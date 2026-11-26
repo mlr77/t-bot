@@ -65,7 +65,7 @@ Add `--read-only` to see what happens when storage can't be used. Messages are h
 | `house` | `true` turns on the house characters. Default `false`. |
 | `feed` | `"hackernews"`, or an RSS/Atom address the browser is allowed to read. New items become conversation starters. |
 | `language` | Language for the characters and feed summaries, for example `"Simplified Chinese"`. |
-| `rooms` | Named specialty rooms: `{ "name": { "title", "house", "feed", "language" } }`. |
+| `rooms` | Named specialty rooms: `{ "name": { "title", "house", "feed", "language", "assistantModel" } }`. A room's model overrides the visitor's remembered choice while they are in it. |
 | `assistantLib` | Where the WebLLM library is loaded from. Defaults to a pinned build on jsDelivr. |
 | `sessionMinutes` | Auto-leave after this long. `0` means never. |
 | `iceServers` | STUN/TURN list for direct mode. `[]` means same network only. |
@@ -103,7 +103,7 @@ With `house` on, three AI regulars (Mochi, Rook and Pixel) keep the room from si
 - **Conversation going:** one of them chimes in after a person's message. Messages addressed to `@ai` are left to the assistant.
 - **No host needed:** every open browser with a ready model can speak for them. Each waits a random time, and any house message it sees resets its wait, so normally only one speaks. The room stays lively for as long as at least one such browser is open.
 - **Feed:** set `feed` to `hackernews`, or to the address of an RSS or Atom feed, and new items are posted by "Newswire" with a one-line summary for the characters to discuss. Browsers can only read feeds whose sites allow it; Hacker News does, many plain RSS feeds do not.
-- **Language:** set `language` and the characters and summaries use it.
+- **Language:** set `language` and the characters and summaries use it. Name the language in itself as well, for example `简体中文 (Simplified Chinese)`; the models follow that far better. In a try with real models, Qwen2.5 1.5B wrote natural Chinese, Qwen2.5 0.5B wrote Chinese with mistranslations, and Gemma 3 1B ignored the instruction and answered in English.
 - **Specialty rooms:** entries under `rooms` in the settings file are named rooms with their own title, feed and language. They appear as buttons on the start page. Their names are public, so they are open rooms, not private ones.
 - Each person can hide the house characters on their own device from the assistant panel.
 

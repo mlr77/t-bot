@@ -248,14 +248,15 @@ const CONFIG = {
     ['Qwen2.5-0.5B-Instruct-q4f16_1-MLC', 'Qwen2.5 0.5B · balanced', 'related'],
     ['gemma3-1b-it-q4f16_1-MLC', 'Gemma 3 1B · best at using the chat', 'all'],
     ['Llama-3.2-1B-Instruct-q4f16_1-MLC', 'Llama 3.2 1B · larger', 'all'],
+    ['Qwen2.5-1.5B-Instruct-q4f16_1-MLC', 'Qwen2.5 1.5B · largest, best for Chinese', 'all'],
   ],
   // House characters: AI regulars, played by the assistant model, that start a
   // conversation when the room is quiet and chime in when one is going.
   house: false,
   houseCharacters: [      // [name, personality]
-    ['Mochi', 'cheerful and curious, always asking questions'],
-    ['Rook', 'dry, skeptical and brief, likes to poke holes in ideas'],
-    ['Pixel', 'practical and a bit nerdy, likes facts and how things work'],
+    ['Mochi', 'cheerful and curious. You always respond by asking one short follow-up question'],
+    ['Rook', 'dry and skeptical. You always push back with a doubt or a counterpoint'],
+    ['Pixel', 'practical and a bit nerdy. You always add one concrete fact, example or tip'],
   ],
   houseStarters: [
     'What is a small thing that made your day better?',
@@ -301,7 +302,7 @@ const $ = id => document.getElementById(id);
 const enc = new TextEncoder(), dec = new TextDecoder();
 const randId = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => b.toString(16).padStart(2, '0')).join('');
 
-let room = '', roomTag = '', roomLabel = '', configNote = '';
+let room = '', roomTag = '', roomLabel = '', configNote = '', roomModel = false;
 const myId = randId(8);
 
 /* ---------- owner settings ---------- */
@@ -345,6 +346,7 @@ async function loadConfig() {
     if (typeof special.house === 'boolean') CONFIG.house = special.house;
     if (typeof special.feed === 'string') CONFIG.feed = special.feed.slice(0, 300);
     if (typeof special.language === 'string') CONFIG.language = special.language.slice(0, 40);
+    if (typeof special.assistantModel === 'string') { CONFIG.assistantModel = special.assistantModel.slice(0, 120); roomModel = true; }
   }
   roomLabel = special && typeof special.title === 'string' ? special.title.slice(0, 40)
     : room === CONFIG.defaultRoom ? room : 'private · ' + roomTag.slice(0, 4);
@@ -1065,7 +1067,7 @@ async function startAssistant() {
   if (!ids.includes(CONFIG.assistantModel)) CONFIG.assistantModels.unshift([CONFIG.assistantModel, CONFIG.assistantModel]);
   for (const id of ['aiModel', 'aiModel2']) { $(id).replaceChildren(); for (const [v, label] of CONFIG.assistantModels) $(id).add(new Option(label + (v === CONFIG.assistantModel ? ' (default)' : ''), v)); }
   let saved = ''; try { saved = localStorage.getItem('ephemeral-room-model') || ''; const b = localStorage.getItem('ephemeral-room-background'); if (['auto', 'related', 'all'].includes(b)) ai.bg = b; } catch {}
-  ai.want = CONFIG.assistantModels.some(m => m[0] === saved) ? saved : CONFIG.assistantModel;
+  ai.want = !roomModel && CONFIG.assistantModels.some(m => m[0] === saved) ? saved : CONFIG.assistantModel;   // a specialty room's model wins
   ai.model = aiBuild(ai.want);
   ai.state = 'loading'; renderAi();
   try {
@@ -1093,7 +1095,7 @@ async function startAssistant() {
 // Switch to another model. The engine and its worker are reused.
 async function chooseModel(id) {
   if (!CONFIG.assistantModels.some(m => m[0] === id) || ai.busy || ai.state === 'loading' || (id === ai.want && ai.state === 'ready')) return renderAi();
-  try { localStorage.setItem('ephemeral-room-model', id); } catch {}
+  if (!roomModel) try { localStorage.setItem('ephemeral-room-model', id); } catch {}
   ai.want = id; ai.model = aiBuild(id);
   if (!ai.engine) return startAssistant();
   ai.state = 'loading'; ai.pct = 0; renderAi();
@@ -1171,7 +1173,7 @@ const between = ([a, b]) => (a + Math.random() * (b - a)) * 1000;
 const houseOn = () => CONFIG.house && CONFIG.assistant && !house.hidden;
 function houseSaw(it) {   // called for every message that arrives, ours included
   if (!it) return;
-  if (it.feed) { house.seen.add(it.feed); house.queue = house.queue.filter(f => f.id !== it.feed); house.feedNext = Date.now() + CONFIG.feedMinutes * 60000; }
+  if (it.feed && !it.feed.startsWith('starter:')) { house.seen.add(it.feed); house.queue = house.queue.filter(f => f.id !== it.feed); house.feedNext = Date.now() + CONFIG.feedMinutes * 60000; }
   house.next = Date.now() + between(it.house ? CONFIG.houseSeconds.next : CONFIG.houseSeconds.react);
 }
 function houseStart() {
@@ -1184,20 +1186,27 @@ function houseStart() {
   if (CONFIG.feed) { feedPoll(); setInterval(feedPoll, 180000); }
 }
 $('houseShow').onchange = e => { house.hidden = !e.target.checked; try { localStorage.setItem('ephemeral-room-house', house.hidden ? 'off' : 'on'); } catch {} document.body.classList.toggle('hide-house', house.hidden); };
-const houseClean = (text, name) => aiClean(text).replace(new RegExp('^\\**' + name + '\\**\\s*[:：-]\\s*', 'i'), '').replace(/^["“]|["”]$/g, '').split(/\n\s*\n/)[0].trim().slice(0, 600);
-async function houseSay(name, persona, instruction, extra) {
+const houseClean = (text, name) => aiClean(text.replace(/```/g, ' '))
+  .replace(/^(okay|ok|sure|alright|certainly|here)\b[^\n:：]{0,60}[:：]\s*/i, '').replace(/^(okay|ok|sure|alright)[,.!]?\s+(let'?s go[.!]?\s*)?/i, '')
+  .replace(new RegExp('^\\**' + name + '\\**\\s*[:：-]\\s*', 'i'), '').replace(/^["“]|["”]$/g, '').split(/\n\s*\n/)[0].trim().slice(0, 600);
+const houseKey = t => t.toLowerCase().replace(/[^a-z0-9\u4e00-\u9fff]+/g, '').slice(0, 28);
+// Small models hold a persona best in the plain chat pattern: who they are in the
+// system message, the latest message as the user turn, with the topic restated
+// so the thread does not drift.
+async function houseSay(name, persona, topic, latest, extra) {
   const started = Date.now();
-  const lang = CONFIG.language ? ' Always write in ' + CONFIG.language + '.' : '';
-  const r = await ai.engine.chat.completions.create({ temperature: 0.8, max_tokens: 90, messages: [
-    { role: 'system', content: 'You are ' + name + ', a regular in a small group chat. Personality: ' + persona + '. Write only your own next chat message: one or two short sentences, casual, with no name in front and no quotation marks.' + lang },
-    { role: 'user', content: instruction },
+  const lang = CONFIG.language;
+  const r = await ai.engine.chat.completions.create({ temperature: 0.8, max_tokens: 80, messages: [
+    { role: 'system', content: 'You are ' + name + ', chatting with friends in a group chat. You are ' + persona + '. Reply with one or two short, casual sentences. Never mention that you are an AI or an assistant.' + (lang ? ' Always reply in ' + lang + '.' : '') },
+    { role: 'user', content: (topic && topic !== latest ? 'The group is talking about: ' + topic + '\n\nLatest message: ' : '') + latest + (lang ? '\n\n(Reply in ' + lang + '.)' : '') },
   ] });
   const text = houseClean(String((r && r.choices && r.choices[0] && r.choices[0].message && r.choices[0].message.content) || ''), name);
   // Someone else's character spoke while this one was thinking, or it just repeated the room: stay quiet.
   const recent = items.filter(it => it.kind === 'msg').slice(-6);
-  if (!text || recent.some(it => it.house && it.ts > started) || recent.some(it => it.text.trim().toLowerCase() === text.toLowerCase())) return;
+  if (!text || recent.some(it => it.house && it.ts > started) || recent.some(it => houseKey(it.text) === houseKey(text))) return;
   await deliver(Object.assign({ t: 'msg', id: randId(8), from: myId, name: myName, ts: Date.now(), text, attachments: [], bot: true, house: true, as: name }, extra || {}));
 }
+const housePost = (name, text, feed) => deliver({ t: 'msg', id: randId(8), from: myId, name: myName, ts: Date.now(), text, attachments: [], bot: true, house: true, as: name, feed });
 async function houseTick() {
   const now = Date.now();
   if (!houseOn() || ai.state !== 'ready' || ai.busy || house.busy || now < house.next) return;
@@ -1207,14 +1216,16 @@ async function houseTick() {
   let run = 0; for (let i = msgs.length - 1; i >= 0 && msgs[i].house; i--) run++;
   const cast = CONFIG.houseCharacters.filter(c => !last || !last.house || c[0] !== last.as);
   const [name, persona] = cast[Math.floor(Math.random() * cast.length)] || CONFIG.houseCharacters[0];
-  const log = msgs.slice(-6).map(it => '- ' + (it.house ? it.as : it.bot ? CONFIG.assistantName : it.name) + ': ' + it.text.replace(/\s+/g, ' ').slice(0, 240)).join('\n');
+  // The topic is whatever started the current thread: a person's message, a feed item or a starter.
+  let root = null; for (let i = msgs.length - 1; i >= 0 && !root; i--) if (!msgs[i].bot || msgs[i].feed) root = msgs[i];
+  const brief = t => t.split('\n')[0].replace(/\s+/g, ' ').slice(0, 240);
   const feedItem = house.queue[0] && now >= house.feedNext ? house.queue[0] : null;
   const idle = !last || now - last.ts > CONFIG.houseIdleMinutes * 60000;
   let job = null;
   if (feedItem && (idle || run >= CONFIG.houseMaxRun || !last || now - last.ts > 20000)) job = () => feedPost(feedItem);
-  else if (last && !last.bot && now - last.ts < 180000) { if (!/(^|\s)@ai\b/i.test(last.text)) job = () => houseSay(name, persona, 'Chat so far:\n' + log + '\n\nWrite ' + name + "'s reply to the last message."); }
-  else if (last && last.house && run < CONFIG.houseMaxRun && now - last.ts < 180000) job = () => houseSay(name, persona, 'Chat so far:\n' + log + '\n\nWrite ' + name + "'s reply to the last message. Add something new.");
-  else if (idle) { const q = CONFIG.houseStarters[Math.floor(Math.random() * CONFIG.houseStarters.length)]; job = () => houseSay(name, persona, 'Nobody is talking. Start a conversation by asking the room this, in your own words: ' + q); }
+  else if (last && !last.bot && now - last.ts < 180000) { if (!/(^|\s)@ai\b/i.test(last.text)) job = () => houseSay(name, persona, '', brief(last.text)); }
+  else if (last && last.house && run < CONFIG.houseMaxRun && now - last.ts < 180000) job = () => houseSay(name, persona, root ? brief(root.text) : '', brief(last.text));
+  else if (idle) job = () => housePost(name, CONFIG.houseStarters[Math.floor(Math.random() * CONFIG.houseStarters.length)], 'starter:' + randId(3));
   if (!job) return;
   house.busy = true;
   try { await job(); } catch (e) { console.warn('house character', e); }
@@ -1258,10 +1269,12 @@ async function feedPoll() {
 async function feedPost(f) {
   house.queue = house.queue.filter(x => x.id !== f.id);
   let note = '';
-  if (CONFIG.language || f.text) {   // summarise, in the room's language when it has one
-    const ask = (CONFIG.language ? 'Summarise this news item in one sentence in ' + CONFIG.language + '. Reply with only the summary.' : 'Summarise this news item in one short sentence. Reply with only the summary.') + '\n\n' + f.title + (f.text ? '\n' + f.text : '');
-    const r = await ai.engine.chat.completions.create({ temperature: 0.3, max_tokens: 120, messages: [{ role: 'user', content: ask }] });
+  if (CONFIG.language || f.text) {   // a one-line gist, in the room's language when it has one
+    const ask = (CONFIG.language ? (f.text ? 'Summarise this news item in one sentence in ' + CONFIG.language + '. Output only the summary.' : 'Translate this headline into ' + CONFIG.language + '. Output only the translation.')
+      : 'Summarise this news item in one short sentence. Output only the summary.') + '\n\n' + f.title + (f.text ? '\n' + f.text : '');
+    const r = await ai.engine.chat.completions.create({ temperature: 0.2, max_tokens: 120, messages: [{ role: 'user', content: ask }] });
     note = aiClean(String((r && r.choices && r.choices[0] && r.choices[0].message && r.choices[0].message.content) || '')).split('\n')[0].slice(0, 400);
+    if (houseKey(note) === houseKey(f.title)) note = '';
   }
   if (house.seen.has(f.id) && items.some(it => it.feed === f.id)) return;   // another browser posted it meanwhile
   await deliver({ t: 'msg', id: randId(8), from: myId, name: myName, ts: Date.now(), text: [f.title, note, f.link].filter(Boolean).join('\n'), attachments: [], bot: true, house: true, as: 'Newswire', feed: f.id });
