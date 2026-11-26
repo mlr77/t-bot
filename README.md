@@ -60,7 +60,7 @@ Add `--read-only` to see what happens when storage can't be used. Messages are h
 | `keepHistory` | `false` wipes the room when the last person leaves, `true` keeps it |
 | `historyMinutes` | Sliding window. Messages older than this disappear for everyone. Default `60`; `0` means no limit. |
 | `assistant` | `true` downloads a small language model into each visitor's browser and answers messages that mention `@ai`. Default `false`. |
-| `assistantModel` | Which WebLLM model to use. Default `SmolLM2-360M-Instruct-q4f16_1-MLC`. |
+| `assistantModel` | The default WebLLM model, `Qwen2.5-0.5B-Instruct-q4f16_1-MLC`. Each visitor can pick another from a short list. |
 | `assistantLib` | Where the WebLLM library is loaded from. Defaults to a pinned build on jsDelivr. |
 | `sessionMinutes` | Auto-leave after this long. `0` means never. |
 | `iceServers` | STUN/TURN list for direct mode. `[]` means same network only. |
@@ -71,8 +71,9 @@ Add `--read-only` to see what happens when storage can't be used. Messages are h
 When `assistant` is on, each visitor's browser downloads a small language model in the background while they read the entry screen (a few hundred MB, once; the browser caches it). It runs entirely on the visitor's device using WebGPU through [WebLLM](https://github.com/mlc-ai/web-llm), in a background worker so the page stays responsive while it thinks. Nothing is sent to an AI service.
 
 - Write `@ai` in a message to ask it something. The reply is produced on the asker's own device and posted to the room, labelled with who asked.
-- It sees only the last few messages in the current window.
-- The default model is tiny. Expect short, simple answers, and do not rely on it for facts, code or reasoning. A larger model such as `Qwen2.5-0.5B-Instruct-q4f16_1-MLC` can be set in `assistantModel` at the cost of a bigger download.
+- It gets the question plus the last few messages as optional background.
+- Each visitor can pick the model from a short list, on the entry screen or by tapping the assistant label in the room. The choice is remembered on their device, and a newly chosen model is downloaded once.
+- The models are small. Expect short, simple answers, and do not rely on them for facts, code or reasoning. In a side-by-side try, Qwen2.5 0.5B (the default) coped best with chat context, LFM2.5 350M was close, and SmolLM2 360M was the weakest but smallest.
 - Browsers without WebGPU, or with data saver on, skip the download and the chat works as normal.
 - On graphics hardware without 16-bit float support, the page switches to the 32-bit build of the same model automatically.
 
@@ -89,14 +90,13 @@ Messages older than `historyMinutes` (one hour by default) are removed from ever
 
 ## Limits
 
-- The assistant has only been tested against a stand-in for the WebLLM interface, not yet with a real model in a real browser.
 - Anyone can label a message as coming from the assistant; the label is a convenience, not a guarantee.
 - Random names hide who is who from other people in the room. They do not hide it from the network: in relay and direct modes browsers connect to each other and can see IP addresses, and in storage mode the bucket's own access logs may record who wrote what.
 - The member list is a pick-list, not a lock. The page cannot tell who is signed in; real access control is the bucket's own access list.
 - Anyone who can load the page and knows a room's name can derive that room's key.
 - The last-person wipe is best effort. Add an expiry rule on `_ephemeral-room/` as a backstop.
 - Relay and direct modes are peer-to-peer, so networks that block those connections need a TURN server in `iceServers`, and a room only exists while someone has it open.
-- Storage mode is tested against the mock server in this repo, not yet against a real bucket. The relay glue is tested against a stand-in for the Trystero API, not yet against live public relays.
+- Storage mode is tested against the mock server in this repo, not yet against a real bucket.
 
 ## License
 

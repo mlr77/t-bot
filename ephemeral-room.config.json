@@ -10,5 +10,5 @@
   "iceServers": [],
   "bucketRoot": "",
   "assistant": true,
-  "assistantModel": "SmolLM2-360M-Instruct-q4f16_1-MLC"
+  "assistantModel": "Qwen2.5-0.5B-Instruct-q4f16_1-MLC"
 }
