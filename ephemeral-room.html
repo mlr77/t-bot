@@ -56,7 +56,7 @@
   .msg.mine { background: var(--mine); }
   .msg.bot { border-left: 3px solid var(--accent); }
   #gate ul { margin: 0; padding-left: 20px; color: var(--muted); font-size: 14px; }
-  #aiStatus { font-size: 12px; }
+  #aiStatus, #passHint { font-size: 12px; }
   #aiPick select, #aiDlg select { width: 100%; padding: 10px 12px; border-radius: 8px; }
   button.chip { min-height: 0; font-size: 13px; cursor: pointer; }
   .msg .meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
@@ -116,6 +116,9 @@
   <label for="nameInput" id="nameLabel">Your name</label>
   <input id="nameInput" maxlength="32" autocomplete="off">
   <select id="nameSelect" class="hidden" aria-labelledby="nameLabel"></select>
+  <label for="passInput">Room passcode (optional)</label>
+  <input id="passInput" maxlength="64" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="Leave empty for the open room">
+  <p id="passHint">A passcode opens a private room. Share the link from inside it and friends land straight in the chat. Anyone who has or guesses the passcode can join, so make it long.</p>
   <button class="primary" type="submit" id="enterBtn" disabled>Enter room</button><button type="button" id="newRoom">Create private room</button>
   <p id="aiStatus" role="status"></p>
   <label id="aiPick" class="hidden">Assistant model <select id="aiModel"></select></label>
@@ -183,6 +186,9 @@
      randomNames    true (default) = nobody types a name; everyone is shown
                     under a random name derived from their session, so the
                     room cannot tell who is who. Ignored when members is set.
+     autoEnter      true (default) = a link with a room passcode after the #
+                    goes straight into the chat, skipping the start page.
+                    Needs random names; ignored when members is set.
      keepHistory    false = wiped when the last person leaves; true = kept
      historyMinutes messages older than this disappear for everyone (default
                     60; 0 = no limit). Anyone can keep a copy with Save chat.
@@ -251,6 +257,7 @@ const CONFIG = {
   chunkChars: 8000,       // split big payloads to stay under channel limits
   maxTextChars: 500000,   // largest single paste
   defaultRoom: 'lobby',   // used when the link has no #name; '' = new private room
+  autoEnter: true,        // a link that carries a room passcode skips the start page
 };
 
 const $ = id => document.getElementById(id);
@@ -274,6 +281,7 @@ async function loadConfig() {
         str('defaultRoom', 64); str('bucketRoot', 200); str('relayLib', 300); str('relayAppId', 64);
         if (typeof c.keepHistory === 'boolean') CONFIG.keepHistory = c.keepHistory;
         if (typeof c.randomNames === 'boolean') CONFIG.randomNames = c.randomNames;
+        if (typeof c.autoEnter === 'boolean') CONFIG.autoEnter = c.autoEnter;
         num('sessionMinutes', 1440);
         if (Number.isFinite(c.maxAgeHours) && c.maxAgeHours > 0) CONFIG.historyMinutes = c.maxAgeHours * 60; // older name
         num('historyMinutes', 5256000);
@@ -290,8 +298,8 @@ async function loadConfig() {
   if (!room) { room = 'room-' + randId(24); history.replaceState(null, '', '#' + room); }
   const h = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode('ephemeral-room/tag/' + room)));
   roomTag = Array.from(h.slice(0, 10), b => b.toString(16).padStart(2, '0')).join('');
-  // A generated private room's name is its secret, so show a fingerprint instead.
-  roomLabel = /^room-[0-9a-f]{48}$/.test(room) ? 'private · ' + roomTag.slice(0, 4) : room;
+  // A private room's passcode is its secret, so show a fingerprint instead.
+  roomLabel = room === CONFIG.defaultRoom ? room : 'private · ' + roomTag.slice(0, 4);
 }
 const ready = loadConfig();
 const allowed = n => !CONFIG.members.length || CONFIG.members.includes(n);
@@ -833,9 +841,15 @@ ready.then(() => {
   for (const t of tips) { const li = document.createElement('li'); li.textContent = t; $('howto').append(li); }
   if (CONFIG.assistant) startAssistant();
   $('enterBtn').disabled = false;
+  // A link that already carries a passcode goes straight in.
+  if (CONFIG.autoEnter && location.hash.length > 1 && anon()) { autoEntered = true; $('gate').requestSubmit(); }
 });
+let autoEntered = false;
+function toStart() { history.replaceState(null, '', location.pathname + location.search); location.reload(); }
 $('gate').addEventListener('submit', e => {
   e.preventDefault();
+  const pass = $('passInput').value.trim();
+  if (pass && pass !== room) { location.hash = encodeURIComponent(pass); return; }   // reloads into that room
   myName = CONFIG.members.length ? $('nameSelect').value : anon() ? anonName(myId) : cleanName($('nameInput').value);
   $('gate').classList.add('hidden');
   for (const id of ['bar', 'peers', 'log', 'composer']) $(id).classList.remove('hidden');
@@ -844,7 +858,10 @@ $('gate').addEventListener('submit', e => {
   renderPeers();
   $('text').focus();
   setInterval(prune, 15000);
-  if (CONFIG.sessionMinutes) setTimeout(() => { leave(true); location.reload(); }, CONFIG.sessionMinutes * 60000);
+  if (autoEntered) sys('You came in by a private link. Anyone with the link can join. You appear as ' + myName + '.'
+    + (CONFIG.historyMinutes ? ' Messages disappear after ' + CONFIG.historyMinutes + ' minutes.' : '')
+    + (CONFIG.assistant ? ' Write @ai to ask the assistant.' : ''));
+  if (CONFIG.sessionMinutes) setTimeout(() => { leave(true); toStart(); }, CONFIG.sessionMinutes * 60000);
   chooseTransport().then(t => {
     if (t === 'storage') {
       mode = 'Encrypted · via shared storage' + (CONFIG.keepHistory ? ' · history kept' : '');
@@ -1118,7 +1135,7 @@ function leave(keepalive) {
   if (relay.on) { relay.on = false; try { relay.room.leave(); } catch {} }
   return leaveBucket(keepalive);
 }
-$('leaveBtn').addEventListener('click', async () => { $('leaveBtn').disabled = true; await Promise.all(leave(false)); location.reload(); });
+$('leaveBtn').addEventListener('click', async () => { $('leaveBtn').disabled = true; await Promise.all(leave(false)); toStart(); });
 addEventListener('pagehide', () => leave(true));
 addEventListener('pageshow', e => { if (e.persisted) location.reload(); });
 document.addEventListener('visibilitychange', () => { if (!document.hidden && bucket.on) heartbeat(); });

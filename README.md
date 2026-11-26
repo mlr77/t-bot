@@ -55,6 +55,7 @@ Add `--read-only` to see what happens when storage can't be used. Messages are h
 | `relayLib` | Where the relay library is loaded from. Defaults to a pinned Trystero build on jsDelivr. |
 | `relayAppId` | Namespace on the public relays. Change it to keep your rooms apart from other copies of this page. |
 | `defaultRoom` | Room used when the link has no `#name`. `""` makes a new private room. |
+| `autoEnter` | `true` (default): a link with a passcode after the `#` skips the start page. Needs random names. |
 | `members` | `[]` for anyone who can load the page, otherwise the names people pick from |
 | `randomNames` | `true` (default): nobody types a name, and everyone appears under a random one that changes each visit. Ignored when `members` is set. |
 | `keepHistory` | `false` wipes the room when the last person leaves, `true` keeps it |
@@ -65,6 +66,18 @@ Add `--read-only` to see what happens when storage can't be used. Messages are h
 | `sessionMinutes` | Auto-leave after this long. `0` means never. |
 | `iceServers` | STUN/TURN list for direct mode. `[]` means same network only. |
 | `bucketRoot` | `""` to auto-detect, or `"/"` or `"/my-bucket/"` to force |
+
+## Private rooms and passcodes
+
+The plain link opens the shared room, with a start page. Anything after a `#` in the link is a room passcode: it names a separate, private room and is also the key that encrypts it.
+
+- Type a passcode on the start page, or press **Create private room** for a long random one.
+- Inside the room, **Copy link** gives a link that includes the passcode. Anyone who opens it lands straight in the chat, with no start page.
+- **Leave** returns to the start page of the shared room.
+- The passcode is never shown on screen; the header shows a short fingerprint instead.
+- A short or guessable passcode is a guessable room. Use a long one, or the generated link.
+
+Set `autoEnter` to `false` to always show the start page.
 
 ## The assistant
 
