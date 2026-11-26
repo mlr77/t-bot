@@ -1278,7 +1278,8 @@ async function feedPost(f) {
     if (houseKey(note) === houseKey(f.title)) note = '';
   }
   if (house.seen.has(f.id) && items.some(it => it.feed === f.id)) return;   // another browser posted it meanwhile
-  await deliver({ t: 'msg', id: randId(8), from: myId, name: myName, ts: Date.now(), text: (CONFIG.language ? [note, f.title, f.link] : [f.title, note, f.link]).filter(Boolean).join('\n'),   // the room's language first, so replies follow it attachments: [], bot: true, house: true, as: 'Newswire', feed: f.id });
+  // The room's language goes first in the post, so the characters' replies follow it.
+  await deliver({ t: 'msg', id: randId(8), from: myId, name: myName, ts: Date.now(), text: (CONFIG.language ? [note, f.title, f.link] : [f.title, note, f.link]).filter(Boolean).join('\n'), attachments: [], bot: true, house: true, as: 'Newswire', feed: f.id });
 }
 
 const dlg = $('dlg');
