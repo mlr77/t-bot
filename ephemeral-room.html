@@ -56,6 +56,10 @@
   .msg.mine { background: var(--mine); }
   .msg.bot { border-left: 3px solid var(--accent); }
   .msg.house { border-left-style: dashed; }
+  .msg .meta .acts { margin-left: auto; display: flex; gap: 4px; }
+  .msg .meta .acts button { margin-left: 0; }
+  #editing { font-size: 13px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
+  #editing button { min-height: 28px; padding: 2px 8px; font-size: 12px; }
   .hide-house .msg.house { display: none; }
   #gate ul { margin: 0; padding-left: 20px; color: var(--muted); font-size: 14px; }
   #aiStatus, #passHint { font-size: 12px; }
@@ -132,13 +136,14 @@
 <header class="hidden" id="bar">
   <h1>Room <span id="roomName"></span></h1>
   <button id="connectBtn" class="primary hidden">Connect</button>
-  <button id="explore">Files</button><button id="shareLink">Copy link</button><button id="saveChat">Save chat</button><button id="leaveBtn">Leave</button>
+  <button id="explore">Files</button><button id="shareLink">Copy link</button><button id="saveChat">Save chat</button><button id="clearView">Clear view</button><button id="clearAll" class="hidden">Clear for everyone</button><button id="leaveBtn">Leave</button>
 </header>
 <div id="peers" class="hidden" aria-label="People in this room"></div>
 <aside id="explorer" class="hidden"><h3>SESSION EXPLORER</h3><input id="searchFiles" placeholder="Filter files"><div id="fileList"></div></aside><main id="log" class="hidden" aria-live="polite">
   <div id="empty">Checking shared storage…</div>
 </main>
 <form id="composer" class="hidden">
+  <div id="editing" class="hidden">Editing your message <button type="button" id="editCancel">Cancel</button></div>
   <div id="drafts" aria-label="Pending attachments"></div>
   <textarea id="text" rows="2" placeholder="Message, paste code, or drop files…" aria-label="Message"></textarea>
   <div class="tools"><button type="button" id="attach">＋ Add files</button><button type="button" id="code">&lt;/&gt; Code</button><button type="button" id="diffBtn">Compare</button><button type="button" id="pasteText">Paste as file</button><input type="file" id="files" multiple hidden><span id="draftStatus" role="status"></span><button class="primary" id="sendBtn" type="submit">Send ↑</button></div>
@@ -204,8 +209,12 @@
      assistantLib   where to load the WebLLM library from
      house          true = house characters (AI regulars played by the
                     assistant model) start and join conversations
-     feed           "hackernews" or an RSS/Atom address; new items are posted
-                    for the characters to discuss
+     feed           where new items come from, for the characters to discuss:
+                    "hackernews", "hackernews-new", "bluesky:<handle>",
+                    "bluesky-feed:<at:// address of a feed>",
+                    "mastodon:<server>#<tag>", or an RSS/Atom address
+     watch          true = a watch-only room: nobody types, and a character
+                    makes one remark about each new feed item
      language       language for the characters and feed summaries
      rooms          named specialty rooms with their own title, house, feed
                     and language, listed on the start page
@@ -276,7 +285,9 @@ const CONFIG = {
   feed: '',
   feedMinutes: 5,         // at most one new item this often
   language: '',           // e.g. 'Simplified Chinese': characters and feed summaries use it
-  rooms: {},              // per-room overrides: { "room-name": { title, house, feed, language } }
+  feedPollSeconds: 180,   // how often to look for new feed items
+  watch: false,           // true = nobody types; the characters only react to the feed
+  rooms: {},              // per-room overrides: { "room-name": { title, house, feed, language, watch, ... } }
   assistantLogChars: 9000, // most chat text handed to the model (its memory is about 4,000 tokens)
   assistantLib: 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.89/+esm', // pinned version
   assistantName: 'Assistant',
@@ -302,7 +313,7 @@ const $ = id => document.getElementById(id);
 const enc = new TextEncoder(), dec = new TextDecoder();
 const randId = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => b.toString(16).padStart(2, '0')).join('');
 
-let room = '', roomTag = '', roomLabel = '', configNote = '', roomModel = false, roomSpecial = false;
+let room = '', roomTag = '', roomLabel = '', configNote = '', roomModel = false, roomSpecial = false, roomPrivate = false;
 const myId = randId(8);
 
 /* ---------- owner settings ---------- */
@@ -321,7 +332,8 @@ async function loadConfig() {
         if (typeof c.randomNames === 'boolean') CONFIG.randomNames = c.randomNames;
         if (typeof c.autoEnter === 'boolean') CONFIG.autoEnter = c.autoEnter;
         if (typeof c.house === 'boolean') CONFIG.house = c.house;
-        str('feed', 300); str('language', 40); num('feedMinutes', 1440); num('houseMaxRun', 20); num('houseIdleMinutes', 1440);
+        str('feed', 300); str('language', 40); num('feedMinutes', 1440); num('feedPollSeconds', 86400);
+        if (typeof c.watch === 'boolean') CONFIG.watch = c.watch; num('houseMaxRun', 20); num('houseIdleMinutes', 1440);
         if (c.houseSeconds && typeof c.houseSeconds === 'object') Object.assign(CONFIG.houseSeconds, c.houseSeconds);
         if (c.rooms && typeof c.rooms === 'object') CONFIG.rooms = c.rooms;
         num('sessionMinutes', 1440);
@@ -347,8 +359,12 @@ async function loadConfig() {
     if (typeof special.house === 'boolean') CONFIG.house = special.house;
     if (typeof special.feed === 'string') CONFIG.feed = special.feed.slice(0, 300);
     if (typeof special.language === 'string') CONFIG.language = special.language.slice(0, 40);
+    if (typeof special.watch === 'boolean') CONFIG.watch = special.watch;
+    if (Number.isFinite(special.feedMinutes) && special.feedMinutes >= 0) CONFIG.feedMinutes = special.feedMinutes;
+    if (Number.isFinite(special.feedPollSeconds) && special.feedPollSeconds >= 20) CONFIG.feedPollSeconds = special.feedPollSeconds;
     if (typeof special.assistantModel === 'string') { CONFIG.assistantModel = special.assistantModel.slice(0, 120); roomModel = true; }
   }
+  roomPrivate = !roomSpecial && room !== CONFIG.defaultRoom;   // a passcode room: its members may clear it for everyone
   roomLabel = special && typeof special.title === 'string' ? special.title.slice(0, 40)
     : room === CONFIG.defaultRoom ? room : 'private · ' + roomTag.slice(0, 4);
 }
@@ -513,7 +529,7 @@ async function poll() {
   } else {
     const cutoff = CONFIG.historyMinutes ? Date.now() - windowMs() : 0;
     if (cutoff) for (const o of out) {   // expired messages are deleted from the bucket, not shown
-      if (!o.name.startsWith('m-') || !(parseInt(o.name.slice(2, 11), 36) < cutoff) || bucket.gone.has(o.name)) continue;
+      if (!/^[mo]-/.test(o.name) || !(parseInt(o.name.slice(2, 11), 36) < cutoff) || bucket.gone.has(o.name)) continue;
       bucket.gone.add(o.name); bucket.fetched.add(o.name); bDel(o.name);
     }
     let fresh = out.map(o => o.name).filter(n => n.startsWith('m-') && !bucket.fetched.has(n)).sort();
@@ -528,6 +544,11 @@ async function poll() {
       if (body === null) return;
       try { acceptMsg(await unseal(body)); } catch {}
     }));
+  }
+  // Deletes, edits and clears made by others arrive as small "o-" objects.
+  for (const n of out.map(o => o.name).filter(n => n.startsWith('o-') && !bucket.fetched.has(n)).sort()) {
+    bucket.fetched.add(n);
+    try { const body = await bGet(n); if (body !== null) await applyOp(await unseal(body)); } catch {}
   }
   bucket.first = false;
   renderPeers();
@@ -589,7 +610,8 @@ async function startRelay() {
   const cfg = { appId: CONFIG.relayAppId, password: room };
   if (CONFIG.iceServers.length) cfg.rtcConfig = { iceServers: CONFIG.iceServers };
   const r = lib.joinRoom(cfg, roomTag, { onJoinError: d => console.warn('relay join error', d && d.error) });
-  relay.msg = r.makeAction('msg'); relay.hello = r.makeAction('hello');
+  relay.msg = r.makeAction('msg'); relay.hello = r.makeAction('hello'); relay.op = r.makeAction('op');
+  relay.op.onMessage = o => { applyOp(o); };
   relay.hello.onMessage = (d, ctx) => {
     const id = ctx && ctx.peerId, name = displayName(d && typeof d.id === 'string' ? d.id.slice(0, 64) : '', d && d.name);
     if (!id || !allowed(name)) return;
@@ -721,12 +743,13 @@ function handle(p, m) {
       if (m.to === myId) onSig(p, m);
       else { const q = peers.get(m.to); if (q) send(q, m); }
       break;
+    case 'op': applyOp(m).then(ok => { if (ok) for (const q of peers.values()) if (q !== p) send(q, m); }); break;
     case 'bye': drop(p); break;
   }
 }
 const cleanName = n => (typeof n === 'string' && n.trim() ? n.trim().slice(0, 32) : 'Guest');
 const roster = () => [{ id: myId, name: myName }, ...[...peers.values()].filter(p => p.open).map(p => ({ id: p.id, name: p.name }))];
-const wire = it => ({ t: 'msg', id: it.id, from: it.from, name: it.name, ts: it.ts, text: it.text, attachments: it.attachments || [], bot: !!it.bot, house: !!it.house, as: it.as || undefined, feed: it.feed || undefined });
+const wire = it => ({ t: 'msg', id: it.id, from: it.from, name: it.name, ts: it.ts, text: it.text, attachments: it.attachments || [], bot: !!it.bot, house: !!it.house, as: it.as || undefined, feed: it.feed || undefined, lock: it.lock || undefined, edited: it.edited || undefined });
 
 /* ---------- automatic mesh: link to peers we hear about, via a mutual peer ---------- */
 function mergeRoster(list, via) {
@@ -806,14 +829,64 @@ async function useCode(code) {
 }
 
 /* ---------- timeline ---------- */
+// Deleting and editing. Each message carries a lock: the hash of a secret only
+// its author's browser holds. A delete or edit must show the secret, so only the
+// author can change a message. It is a request to honest browsers, not a recall:
+// anything already saved or copied elsewhere stays there.
+const myKeys = new Map(), opSeen = new Set(), pendingOps = new Map();
+const sha = async t => Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(t))), b => b.toString(16).padStart(2, '0')).join('');
+function redraw() {
+  const log = $('log');
+  log.querySelectorAll('.msg,.sys').forEach(n => n.remove());
+  for (const x of items) log.append(node(x));
+  $('empty').classList.toggle('hidden', items.length > 0);
+  refreshExplorer();
+}
+async function applyOp(o) {
+  if (!o || typeof o !== 'object' || typeof o.oid !== 'string' || o.oid.length > 40 || opSeen.has(o.oid)) return false;
+  if (o.op === 'clear') {
+    if (!roomPrivate || !Number.isFinite(o.ts)) return false;
+    opSeen.add(o.oid);
+    const upTo = Math.min(o.ts, Date.now() + 300000);
+    for (let i = items.length - 1; i >= 0; i--) if (items[i].kind === 'msg' && items[i].ts <= upTo) items.splice(i, 1);
+    redraw(); sys('The chat was cleared for everyone.');
+    return true;
+  }
+  if ((o.op !== 'del' && o.op !== 'edit') || typeof o.id !== 'string' || typeof o.key !== 'string' || o.key.length > 80) return false;
+  const it = items.find(x => x.kind === 'msg' && x.id === o.id);
+  if (!it) { if (pendingOps.size < 200) pendingOps.set(o.id, o); return false; }   // arrived before its message
+  if (!it.lock || await sha(o.key) !== it.lock) return false;
+  if (o.op === 'edit' && (typeof o.text !== 'string' || !o.text.trim() || o.text.length > CONFIG.maxTextChars)) return false;
+  opSeen.add(o.oid);
+  if (o.op === 'del') items.splice(items.indexOf(it), 1); else { it.text = o.text; it.edited = true; }
+  redraw();
+  return true;
+}
+async function sendOp(o) {
+  o.oid = randId(8);
+  const it = o.id ? items.find(x => x.kind === 'msg' && x.id === o.id) : null;
+  const key = it ? 'm-' + it.ts.toString(36).padStart(9, '0') + '-' + it.id : '';
+  if (bucket.on) {
+    const name = 'o-' + Date.now().toString(36).padStart(9, '0') + '-' + o.oid;
+    bucket.fetched.add(name);
+    await bPut(name, await seal(o));
+    if (o.op === 'del' && key) { bucket.gone.add(key); bDel(key); }
+    if (o.op === 'edit' && it) await bPut(key, await seal(Object.assign(wire(it), { text: o.text, edited: true })));
+    if (o.op === 'clear') for (const k of bucket.keys) if (k.startsWith('m-')) { bucket.gone.add(k); bDel(k); }
+  } else if (relay.on) { if (relayPeerCount()) await relay.op.send(o); }
+  else for (const p of peers.values()) send(p, Object.assign({ t: 'op' }, o));
+  await applyOp(o);
+}
 const cmp = (a, b) => a.ts - b.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
 function acceptMsg(m) {
   if (typeof m.id !== 'string' || seen.has(m.id) || typeof m.text !== 'string' || (!m.text && !m.attachments?.length) ||
       m.text.length > CONFIG.maxTextChars || !Number.isFinite(m.ts) || !validAttachments(m.attachments) || !allowed(displayName(m.from, m.name)) ||
-      expired(m.ts) || m.ts > Date.now() + 300000) return false;
+      expired(m.ts) || m.ts > Date.now() + 300000 || (CONFIG.watch && !(m.bot === true && m.house === true))) return false;
   seen.add(m.id);
   addItem({ kind: 'msg', id: m.id, from: String(m.from), name: displayName(m.from, m.name), ts: m.ts, text: m.text, attachments: m.attachments || [], bot: m.bot === true,
-    house: m.bot === true && m.house === true, as: typeof m.as === 'string' ? m.as.trim().slice(0, 24) : '', feed: typeof m.feed === 'string' ? m.feed.slice(0, 80) : '' });
+    house: m.bot === true && m.house === true, as: typeof m.as === 'string' ? m.as.trim().slice(0, 24) : '', feed: typeof m.feed === 'string' ? m.feed.slice(0, 80) : '',
+    lock: typeof m.lock === 'string' ? m.lock.slice(0, 64) : '', edited: m.edited === true });
+  const waiting = pendingOps.get(m.id); if (waiting) { pendingOps.delete(m.id); applyOp(waiting); }
   if (typeof houseSaw === 'function') houseSaw(items[items.length - 1] && items.find(x => x.id === m.id));
   return true;
 }
@@ -838,10 +911,16 @@ function node(it) {
   const meta = document.createElement('div'); meta.className = 'meta';
   const who = document.createElement('b'); who.textContent = botLabel(it);
   const when = document.createElement('span');
-  when.textContent = new Date(it.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  when.textContent = new Date(it.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) + (it.edited ? ' · edited' : '');
   const cp = document.createElement('button'); cp.type = 'button'; cp.textContent = 'Copy';
   cp.addEventListener('click', async () => { cp.textContent = (await copy(it.text)) ? 'Copied' : 'Copy failed'; setTimeout(() => cp.textContent = 'Copy', 1500); });
-  meta.append(who, when, cp);
+  const acts = document.createElement('span'); acts.className = 'acts'; acts.append(cp);
+  if (myKeys.has(it.id)) {   // your own message: you can change or remove it for everyone
+    const mk = (label, fn) => { const b = document.createElement('button'); b.type = 'button'; b.textContent = label; b.onclick = () => fn(b); acts.append(b); };
+    if (!it.bot) mk('Edit', () => startEdit(it));
+    mk('Delete', b => { if (b.dataset.sure) sendOp({ op: 'del', id: it.id, key: myKeys.get(it.id) }).catch(e => sys('Delete failed: ' + e.message)); else { b.dataset.sure = '1'; b.textContent = 'Sure?'; setTimeout(() => { delete b.dataset.sure; b.textContent = 'Delete'; }, 3000); } });
+  }
+  meta.append(who, when, acts);
   const body = document.createElement('div'); body.className='body'; renderMarkdown(body,it.text);
   el.append(meta, body); for(const a of it.attachments || []) el.append(attachmentNode(a));
   return el;
@@ -917,8 +996,10 @@ $('gate').addEventListener('submit', e => {
   renderPeers();
   $('text').focus();
   setInterval(prune, 15000);
+  $('clearAll').classList.toggle('hidden', !roomPrivate);
+  if (CONFIG.watch) { $('composer').classList.add('hidden'); sys('This is a watch-only room. Nobody types here; the house characters react to a live feed.'); }
   houseStart();
-  if (autoEntered) sys((roomSpecial ? 'This is an open room that anyone can find.' : 'You came in by a private link. Anyone with the link can join.') + ' You appear as ' + myName + '.'
+  if (autoEntered && !CONFIG.watch) sys((roomSpecial ? 'This is an open room that anyone can find.' : 'You came in by a private link. Anyone with the link can join.') + ' You appear as ' + myName + '.'
     + (CONFIG.historyMinutes ? ' Messages disappear after ' + CONFIG.historyMinutes + ' minutes.' : '')
     + (CONFIG.assistant ? ' Write @ai to ask the assistant.' : ''));
   if (CONFIG.sessionMinutes) setTimeout(() => { leave(true); toStart(); }, CONFIG.sessionMinutes * 60000);
@@ -979,13 +1060,25 @@ $('composer').addEventListener('paste',e=>{const files=[...e.clipboardData.files
 for(const event of ['dragover','dragleave','drop']) $('composer').addEventListener(event,e=>{e.preventDefault();$('composer').classList.toggle('drag',event==='dragover');if(event==='drop')addFiles([...e.dataTransfer.files]);});
 // Send one message over whichever transport is active, then show it locally.
 async function deliver(m) {
+  if (!m.lock) { const key = randId(16); m.lock = await sha(key); myKeys.set(m.id, key); }   // only this browser can delete or edit it
   if (bucket.on) { const key = 'm-' + m.ts.toString(36).padStart(9, '0') + '-' + m.id; bucket.fetched.add(key); await bPut(key, await seal(m)); bucket.keys.push(key); }
   else if (relay.on) { if (relayPeerCount()) await relay.msg.send(m); }
   else { const results = await Promise.all([...peers.values()].filter(p => p.open).map(p => send(p, m))); if (!results.length || results.some(x => !x)) throw Error('One or more transfers failed'); }
   acceptMsg(m);
 }
+let editing = '';
+function startEdit(it) { editing = it.id; $('text').value = it.text; $('editing').classList.remove('hidden'); $('text').focus(); }
+function stopEdit() { editing = ''; $('editing').classList.add('hidden'); $('text').value = ''; $('text').style.height = ''; }
+$('editCancel').onclick = stopEdit;
 async function post() {
   if(reading||posting)return;
+  if (CONFIG.watch) return;
+  if (editing) {
+    const text = $('text').value;
+    if (!text.trim()) return;
+    try { await sendOp({ op: 'edit', id: editing, key: myKeys.get(editing), text }); stopEdit(); } catch (e) { sys('Edit failed: ' + e.message); }
+    return;
+  }
   const el=$('text'),text=el.value;if(!text.trim()&&!drafts.length)return;
   if(text.length>CONFIG.maxTextChars){sys('Message exceeds text limit.');return;}
   if(!bucket.on && !relay.on && ![...peers.values()].some(p=>p.open)){sys('Connect a participant before sending.');return;}
@@ -1015,6 +1108,12 @@ function prune() {
   if (!items.length) $('empty').classList.remove('hidden');
   refreshExplorer();
 }
+$('clearView').onclick = () => { items.length = 0; redraw(); };   // this device only; others keep their copy
+$('clearAll').onclick = e => {
+  const b = e.currentTarget;
+  if (b.dataset.sure) { delete b.dataset.sure; b.textContent = 'Clear for everyone'; sendOp({ op: 'clear', ts: Date.now() }).catch(err => sys('Clear failed: ' + err.message)); }
+  else { b.dataset.sure = '1'; b.textContent = 'Tap again to clear'; setTimeout(() => { delete b.dataset.sure; b.textContent = 'Clear for everyone'; }, 4000); }
+};
 $('saveChat').onclick = () => {
   const pad = n => String(n).padStart(2, '0'), d = new Date();
   const msgs = items.filter(it => it.kind === 'msg');
@@ -1184,7 +1283,7 @@ function houseStart() {
   if (!(CONFIG.house && CONFIG.assistant)) return;
   house.started = Date.now(); house.next = house.started + CONFIG.houseSeconds.first * 1000 + Math.random() * 4000;
   setInterval(() => houseTick().catch(() => {}), 3000);
-  if (CONFIG.feed) { feedPoll(); setInterval(feedPoll, 180000); }
+  if (CONFIG.feed) { feedPoll(); setInterval(feedPoll, Math.max(20, CONFIG.feedPollSeconds) * 1000); }
 }
 $('houseShow').onchange = e => { house.hidden = !e.target.checked; try { localStorage.setItem('ephemeral-room-house', house.hidden ? 'off' : 'on'); } catch {} document.body.classList.toggle('hide-house', house.hidden); };
 const houseClean = (text, name) => aiClean(text.replace(/```/g, ' '))
@@ -1223,7 +1322,11 @@ async function houseTick() {
   const feedItem = house.queue[0] && now >= house.feedNext ? house.queue[0] : null;
   const idle = !last || now - last.ts > CONFIG.houseIdleMinutes * 60000;
   let job = null;
-  if (feedItem && (idle || run >= CONFIG.houseMaxRun || !last || now - last.ts > 20000)) job = () => feedPost(feedItem);
+  if (CONFIG.watch) {   // watch-only room: post each new item, then one remark about it
+    if (last && last.as === 'Newswire' && now - last.ts < 180000) job = () => houseSay(name, persona + '. You are watching a live feed with friends and make one short, witty remark about each post', '', brief(last.text));
+    else if (feedItem) job = () => feedPost(feedItem);
+  }
+  else if (feedItem && (idle || run >= CONFIG.houseMaxRun || !last || now - last.ts > 20000)) job = () => feedPost(feedItem);
   else if (last && !last.bot && now - last.ts < 180000) { if (!/(^|\s)@ai\b/i.test(last.text)) job = () => houseSay(name, persona, '', brief(last.text)); }
   else if (last && last.house && run < CONFIG.houseMaxRun && now - last.ts < 180000) job = () => houseSay(name, persona, root ? brief(root.text) : '', brief(last.text));
   else if (idle) job = () => housePost(name, CONFIG.houseStarters[Math.floor(Math.random() * CONFIG.houseStarters.length)], 'starter:' + randId(3));
@@ -1233,36 +1336,50 @@ async function houseTick() {
   house.busy = false;
   house.next = Math.max(house.next, Date.now() + between(CONFIG.houseSeconds.next));
 }
-// Feed: new items become conversation starters. Browsers can only read feeds
-// that allow it; Hacker News does, most plain RSS feeds do not.
+// Feed: new items become conversation starters. A browser can only read sources
+// that allow it. These do: Hacker News, Bluesky's public API and Mastodon tag
+// timelines. X, Weibo and most plain RSS feeds do not.
+async function feedFetch() {
+  const get = async u => { const r = await fetch(u, { cache: 'no-store' }); if (!r.ok) throw new Error('HTTP ' + r.status); return r; };
+  const f = CONFIG.feed, one = t => String(t || '').replace(/\s+/g, ' ').trim();
+  if (f === 'hackernews' || f === 'hackernews-new') {
+    const ids = (await (await get('https://hacker-news.firebaseio.com/v0/' + (f === 'hackernews' ? 'topstories' : 'newstories') + '.json')).json()).slice(0, 30);
+    return ids.map(id => ({ id: 'hn:' + id, load: async () => { const it = await (await get('https://hacker-news.firebaseio.com/v0/item/' + id + '.json')).json(); return it && it.title ? { title: one(it.title).slice(0, 300), link: String(it.url || 'https://news.ycombinator.com/item?id=' + id).slice(0, 400) } : null; } }));
+  }
+  if (f.startsWith('bluesky:') || f.startsWith('bluesky-feed:')) {
+    const api = 'https://public.api.bsky.app/xrpc/app.bsky.feed.';
+    const j = await (await get(f.startsWith('bluesky:') ? api + 'getAuthorFeed?limit=15&filter=posts_no_replies&actor=' + encodeURIComponent(f.slice(8))
+      : api + 'getFeed?limit=15&feed=' + encodeURIComponent(f.slice(13)))).json();
+    return (j.feed || []).map(x => x.post).filter(p => p && p.record && one(p.record.text)).map(p => ({ id: 'bsky:' + p.uri.slice(-40),
+      title: ('@' + p.author.handle + ': ' + one(p.record.text)).slice(0, 400), link: 'https://bsky.app/profile/' + p.author.handle + '/post/' + p.uri.split('/').pop() }));
+  }
+  if (f.startsWith('mastodon:')) {
+    const [server, tag] = f.slice(9).split('#');
+    const j = await (await get('https://' + server + '/api/v1/timelines/tag/' + encodeURIComponent(tag || 'news') + '?limit=15')).json();
+    const text = h => one(new DOMParser().parseFromString(h, 'text/html').body.textContent);
+    return j.filter(x => x && !x.sensitive && text(x.content)).map(x => ({ id: 'masto:' + x.id, title: ('@' + x.account.acct + ': ' + text(x.content)).slice(0, 400), link: String(x.url || '').slice(0, 400) }));
+  }
+  const doc = new DOMParser().parseFromString(await (await get(f)).text(), 'application/xml');
+  const pick = (el, n) => { const x = el.getElementsByTagNameNS('*', n)[0]; return x ? x.textContent.trim() : ''; };
+  return [...doc.getElementsByTagNameNS('*', 'item'), ...doc.getElementsByTagNameNS('*', 'entry')].slice(0, 20).map(el => {
+    const l = el.getElementsByTagNameNS('*', 'link')[0];
+    const link = l ? (l.getAttribute('href') || l.textContent.trim()) : '';
+    const body = one(new DOMParser().parseFromString(pick(el, 'description') || pick(el, 'summary'), 'text/html').body.textContent);
+    return { id: 'rss:' + (pick(el, 'guid') || pick(el, 'id') || link || pick(el, 'title')).slice(0, 70), title: pick(el, 'title').slice(0, 300), link: link.slice(0, 400), text: body.slice(0, 600) };
+  }).filter(e => e.title);
+}
 async function feedPoll() {
   if (!houseOn()) return;
   try {
-    let found = [];
-    if (CONFIG.feed === 'hackernews') {
-      const ids = (await (await fetch('https://hacker-news.firebaseio.com/v0/topstories.json', { cache: 'no-store' })).json()).slice(0, 30);
-      const fresh = ids.filter(id => !house.seen.has('hn:' + id));
-      const first = !house.polled; house.polled = true;
-      for (const id of fresh) house.seen.add('hn:' + id);
-      for (const id of (first ? fresh.slice(0, 1) : fresh.slice(0, 3))) {   // on arrival just the top story, afterwards whatever is new
-        const it = await (await fetch('https://hacker-news.firebaseio.com/v0/item/' + id + '.json')).json();
-        if (it && it.title) found.push({ id: 'hn:' + id, title: String(it.title).slice(0, 300), link: String(it.url || 'https://news.ycombinator.com/item?id=' + id).slice(0, 400), text: '' });
-      }
-    } else {
-      const doc = new DOMParser().parseFromString(await (await fetch(CONFIG.feed, { cache: 'no-store' })).text(), 'application/xml');
-      const pick = (el, n) => { const x = el.getElementsByTagNameNS('*', n)[0]; return x ? x.textContent.trim() : ''; };
-      const entries = [...doc.getElementsByTagNameNS('*', 'item'), ...doc.getElementsByTagNameNS('*', 'entry')].slice(0, 20).map(el => {
-        const l = el.getElementsByTagNameNS('*', 'link')[0];
-        const link = l ? (l.getAttribute('href') || l.textContent.trim()) : '';
-        const body = new DOMParser().parseFromString(pick(el, 'description') || pick(el, 'summary'), 'text/html').body.textContent.replace(/\s+/g, ' ').trim();
-        return { id: 'rss:' + (pick(el, 'guid') || pick(el, 'id') || link || pick(el, 'title')).slice(0, 70), title: pick(el, 'title').slice(0, 300), link: link.slice(0, 400), text: body.slice(0, 600) };
-      }).filter(e => e.title);
-      const fresh = entries.filter(e => !house.seen.has(e.id));
-      const first = !house.polled; house.polled = true;
-      for (const e of fresh) house.seen.add(e.id);
-      found = first ? fresh.slice(0, 1) : fresh.slice(0, 3);
+    const fresh = (await feedFetch()).filter(e => !house.seen.has(e.id));
+    const first = !house.polled; house.polled = true;
+    for (const e of fresh) house.seen.add(e.id);
+    // On arrival just the newest item; afterwards whatever is new, oldest first.
+    for (const e of (first ? fresh.slice(0, 1) : fresh.slice(0, 3).reverse())) {
+      const full = e.load ? await e.load() : e;
+      if (full) house.queue.push({ id: e.id, title: full.title, link: full.link || '', text: full.text || '' });
     }
-    house.queue.push(...found); house.queue = house.queue.slice(-5);
+    house.queue = house.queue.slice(-5);
   } catch (e) {
     if (!house.feedErr) { house.feedErr = true; sys('The feed could not be read from this browser. Many sites do not allow pages to read their feeds directly.'); }
   }

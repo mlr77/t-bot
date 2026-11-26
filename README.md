@@ -63,9 +63,10 @@ Add `--read-only` to see what happens when storage can't be used. Messages are h
 | `assistant` | `true` downloads a small language model into each visitor's browser and answers messages that mention `@ai`. Default `false`. |
 | `assistantModel` | The default WebLLM model, `Qwen2.5-0.5B-Instruct-q4f16_1-MLC`. Each visitor can pick another from a short list. |
 | `house` | `true` turns on the house characters. Default `false`. |
-| `feed` | `"hackernews"`, or an RSS/Atom address the browser is allowed to read. New items become conversation starters. |
+| `feed` | Where new items come from; see the table under watch-only rooms. New items become conversation starters. |
 | `language` | Language for the characters and feed summaries, for example `"Simplified Chinese"`. |
-| `rooms` | Named specialty rooms: `{ "name": { "title", "house", "feed", "language", "assistantModel" } }`. A room's model overrides the visitor's remembered choice while they are in it. |
+| `watch` | `true` makes a watch-only room: no message box, one character remark per feed item. |
+| `rooms` | Named specialty rooms: `{ "name": { "title", "house", "feed", "language", "watch", "feedMinutes", "assistantModel" } }`. A room's model overrides the visitor's remembered choice while they are in it. |
 | `assistantLib` | Where the WebLLM library is loaded from. Defaults to a pinned build on jsDelivr. |
 | `sessionMinutes` | Auto-leave after this long. `0` means never. |
 | `iceServers` | STUN/TURN list for direct mode. `[]` means same network only. |
@@ -106,6 +107,33 @@ With `house` on, three AI regulars (Mochi, Rook and Pixel) keep the room from si
 - **Language:** set `language` and the characters and summaries use it. Name the language in itself as well, for example `简体中文 (Simplified Chinese)`; the models follow that far better. In a try with real models, Qwen2.5 1.5B wrote natural Chinese, Qwen2.5 0.5B wrote Chinese with mistranslations, and Gemma 3 1B ignored the instruction and answered in English.
 - **Specialty rooms:** entries under `rooms` in the settings file are named rooms with their own title, feed and language. They appear as buttons on the start page. Their names are public, so they are open rooms, not private ones.
 - Each person can hide the house characters on their own device from the assistant panel.
+
+## Watch-only rooms
+
+A specialty room with `watch` set to `true` has no message box. "Newswire" posts each new feed item, and one house character makes a single remark about it. The repo's example is `#live-wire`, which follows new Hacker News submissions.
+
+Feed sources a browser is allowed to read, all tried from a real browser:
+
+| `feed` value | What it follows |
+| --- | --- |
+| `hackernews` | Hacker News top stories |
+| `hackernews-new` | Every new Hacker News submission |
+| `bluesky:<handle>` | One Bluesky account's posts, for example `bluesky:bsky.app` |
+| `bluesky-feed:<at:// address>` | A Bluesky feed such as "What's Hot" |
+| `mastodon:<server>#<tag>` | A hashtag on a Mastodon server, for example `mastodon:mastodon.social#astronomy` |
+| an `https://` address | An RSS or Atom feed, if its site allows browsers to read it |
+
+X and Weibo cannot be read from a static page: both need a signed-in API and neither allows browser requests from other sites. Following them would take a small scheduled job that fetches the posts and writes them to a file this page can poll.
+
+Public timelines are unfiltered. A firehose such as "What's Hot" can put anything on the page, and the characters will comment on it, so following chosen accounts or tags is safer.
+
+## Deleting, editing and clearing
+
+- **Delete** and **Edit** appear on your own messages. The change reaches every open browser, and people who join later never see the old version.
+- Only the author can do this: each message carries the hash of a secret that only the author's browser holds, and a delete or edit has to present the secret.
+- **Clear view** empties the chat on your device only.
+- **Clear for everyone** exists only in passcode rooms, where everyone present was given the link.
+- These are requests to well-behaved browsers, not a recall. Anything already saved, copied or screenshotted stays where it is.
 
 ## History and saving
 

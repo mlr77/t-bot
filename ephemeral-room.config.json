@@ -19,6 +19,14 @@
       "feed": "hackernews",
       "language": "简体中文 (Simplified Chinese)",
       "assistantModel": "Qwen2.5-1.5B-Instruct-q4f16_1-MLC"
+    },
+    "live-wire": {
+      "title": "Live wire · watch only",
+      "watch": true,
+      "house": true,
+      "feed": "hackernews-new",
+      "feedMinutes": 1,
+      "feedPollSeconds": 60
     }
   }
 }
