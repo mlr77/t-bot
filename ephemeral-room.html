@@ -162,7 +162,7 @@
   <div class="row"><button id="closeBtn">Close</button></div>
 </dialog>
 
-<dialog id="aiDlg"><h2>Assistant</h2><p>Runs on this device. A different model is downloaded once, then kept by the browser.</p><label>Model <select id="aiModel2"></select></label><p id="aiStatus2" role="status"></p><div class="row"><button id="aiClose">Close</button></div></dialog>
+<dialog id="aiDlg"><h2>Assistant</h2><p>Runs on this device. A different model is downloaded once, then kept by the browser.</p><label>Model <select id="aiModel2"></select></label><label>Chat it can see <select id="aiBg"><option value="auto">Automatic for the model</option><option value="related">Only messages related to the question</option><option value="all">The whole chat, as much as fits</option></select></label><p id="aiBgNote"></p><p id="aiStatus2" role="status"></p><div class="row"><button id="aiClose">Close</button></div></dialog>
 <dialog id="inspect"><h2 id="inspectTitle">Attachment</h2><div id="imageArea"></div><label>Zoom <input id="zoom" type="range" min="1" max="3" step=".1" value="1"></label><button onclick="this.closest('dialog').close()">Close</button></dialog><dialog id="diffDialog"><h2>Compare text</h2><textarea id="before" placeholder="Original"></textarea><textarea id="after" placeholder="Modified"></textarea><button id="runDiff">Compare</button><button id="attachDiff">Attach diff</button><button onclick="this.closest('dialog').close()">Close</button><pre id="diffOutput" class="codeview"></pre></dialog><div id="transfer" role="status"></div><script>
 'use strict';
 /* ---------------------------------------------------------------------------
@@ -223,13 +223,17 @@ const CONFIG = {
   historyMinutes: 60,     // sliding window: older messages disappear; 0 = no limit
   assistant: false,       // in-browser AI helper that answers when someone writes @ai
   assistantModel: 'Qwen2.5-0.5B-Instruct-q4f16_1-MLC',   // default; each visitor can pick another
-  assistantModels: [      // choices offered in the model picker, smallest first
-    ['SmolLM2-360M-Instruct-q4f16_1-MLC', 'SmolLM2 360M · smallest, weakest'],
-    ['LFM2.5-350M-q4f16_1-MLC', 'LFM2.5 350M · small'],
-    ['Qwen2.5-0.5B-Instruct-q4f16_1-MLC', 'Qwen2.5 0.5B · balanced'],
-    ['gemma3-1b-it-q4f16_1-MLC', 'Gemma 3 1B · larger'],
-    ['Llama-3.2-1B-Instruct-q4f16_1-MLC', 'Llama 3.2 1B · larger'],
+  // Choices offered in the model picker, smallest first: [id, label, background].
+  // Background is what "Automatic" gives that model: 'all' = as much of the chat
+  // as fits, 'related' = only messages that share words with the question.
+  assistantModels: [
+    ['SmolLM2-360M-Instruct-q4f16_1-MLC', 'SmolLM2 360M · smallest, weakest', 'related'],
+    ['LFM2.5-350M-q4f16_1-MLC', 'LFM2.5 350M · small', 'related'],
+    ['Qwen2.5-0.5B-Instruct-q4f16_1-MLC', 'Qwen2.5 0.5B · balanced', 'related'],
+    ['gemma3-1b-it-q4f16_1-MLC', 'Gemma 3 1B · best at using the chat', 'all'],
+    ['Llama-3.2-1B-Instruct-q4f16_1-MLC', 'Llama 3.2 1B · larger', 'all'],
   ],
+  assistantLogChars: 9000, // most chat text handed to the model (its memory is about 4,000 tokens)
   assistantLib: 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.89/+esm', // pinned version
   assistantName: 'Assistant',
   sessionMinutes: 0,      // 0 = no auto-leave
@@ -493,7 +497,7 @@ function leaveBucket(keepalive) {
 // Applied once, as soon as the transport is known, so the strict policy stays
 // in force everywhere except when the relay transport is actually in use.
 let cspDone = false;
-const ai = { state: 'off', pct: 0, engine: null, worker: null, want: '', model: '', f16: true, why: '', busy: false };
+const ai = { state: 'off', pct: 0, engine: null, worker: null, want: '', model: '', bg: 'auto', f16: true, why: '', busy: false };
 function applyCsp(forRelay) {
   if (cspDone) return; cspDone = true;
   const origin = u => { try { return new URL(u, location.href).origin; } catch { return ''; } };
@@ -968,6 +972,8 @@ function renderAi() {
   $('aiStatus').textContent = $('aiStatus2').textContent = aiNote();
   const pickable = ai.state === 'ready' || ai.state === 'error';
   for (const id of ['aiModel', 'aiModel2']) { $(id).value = ai.want; $(id).disabled = !pickable || ai.busy; }
+  $('aiBg').value = ai.bg;
+  $('aiBgNote').textContent = 'Now: ' + (aiBackground() === 'all' ? 'the whole chat, as much as fits.' : 'only related messages, or the whole chat when asked for a summary.');
   $('aiPick').classList.toggle('hidden', ai.state === 'off' || ai.state === 'unsupported');
   if (myName) renderPeers();
 }
@@ -984,7 +990,7 @@ async function startAssistant() {
   const ids = CONFIG.assistantModels.map(m => m[0]);
   if (!ids.includes(CONFIG.assistantModel)) CONFIG.assistantModels.unshift([CONFIG.assistantModel, CONFIG.assistantModel]);
   for (const id of ['aiModel', 'aiModel2']) { $(id).replaceChildren(); for (const [v, label] of CONFIG.assistantModels) $(id).add(new Option(label + (v === CONFIG.assistantModel ? ' (default)' : ''), v)); }
-  let saved = ''; try { saved = localStorage.getItem('ephemeral-room-model') || ''; } catch {}
+  let saved = ''; try { saved = localStorage.getItem('ephemeral-room-model') || ''; const b = localStorage.getItem('ephemeral-room-background'); if (['auto', 'related', 'all'].includes(b)) ai.bg = b; } catch {}
   ai.want = CONFIG.assistantModels.some(m => m[0] === saved) ? saved : CONFIG.assistantModel;
   ai.model = aiBuild(ai.want);
   ai.state = 'loading'; renderAi();
@@ -1023,13 +1029,38 @@ async function chooseModel(id) {
 }
 $('aiModel').onchange = e => chooseModel(e.target.value);
 $('aiModel2').onchange = e => chooseModel(e.target.value);
+$('aiBg').onchange = e => { ai.bg = e.target.value; try { localStorage.setItem('ephemeral-room-background', ai.bg); } catch {} renderAi(); };
 $('aiClose').onclick = () => $('aiDlg').close();
-// Small models answer best when the question comes first, stated plainly, with
-// any earlier messages offered after it as optional background.
-function aiMessages(question, earlier) {
+// What the model is shown. Tried against real models with a 45-message chat:
+// the 1B models can use the whole log; smaller ones do better when handed only
+// the messages that share words with the question, plus their neighbours.
+function aiBackground() {
+  if (ai.bg !== 'auto') return ai.bg;
+  const m = CONFIG.assistantModels.find(x => x[0] === ai.want);
+  return m && m[2] === 'all' ? 'all' : 'related';
+}
+const AI_STOP = new Set('what when where which who whom whose why how the and for are was were will with that this have has had from they them their there here about into just your you our out can could should would did does not but all any tell give make please know think'.split(' '));
+const aiWords = t => (t.toLowerCase().match(/[a-z0-9]+/g) || []).filter(w => w.length > 2 && !AI_STOP.has(w)).map(w => w.replace(/(ing|ed|es|s)$/, ''));
+const aiBroad = q => /summar|recap|decid|\bplan\b|catch me up|so far|overview|what did (we|i) miss/i.test(q);
+function aiSelect(question, msgs) {
+  let sel = msgs;
+  if (aiBackground() === 'related' && !aiBroad(question)) {
+    const qw = new Set(aiWords(question));
+    const top = msgs.map((m, i) => ({ i, s: aiWords(m.text).filter(w => qw.has(w)).length })).filter(x => x.s > 0)
+      .sort((a, b) => b.s - a.s || b.i - a.i).slice(0, 5);
+    const keep = new Set(msgs.map((m, i) => i).slice(-4));          // always the last few
+    for (const { i } of top) for (const j of [i - 1, i, i + 1]) if (j >= 0 && j < msgs.length) keep.add(j);
+    sel = msgs.filter((m, i) => keep.has(i));
+  }
+  // Newest first until the budget is used, then back to oldest-first order.
+  const out = []; let room = CONFIG.assistantLogChars;
+  for (let i = sel.length - 1; i >= 0; i--) { const line = '- ' + sel[i].name + ': ' + sel[i].text; if (line.length > room) break; out.unshift(line); room -= line.length + 1; }
+  return out;
+}
+function aiMessages(question, lines) {
   return [
     { role: 'system', content: 'You are a friendly, concise assistant in a group chat. Answer the question directly.' },
-    { role: 'user', content: question + (earlier.length ? '\n\n(Earlier chat messages, use only if relevant:\n' + earlier.map(t => '- ' + t).join('\n') + ')' : '') },
+    { role: 'user', content: (lines.length ? 'Chat log, oldest first. Later messages override earlier ones.\n' + lines.join('\n') + '\n\nUsing the chat log, answer: ' : '') + question },
   ];
 }
 const aiClean = text => text.trim().replace(/^(ai|assistant)\s*:\s*/i, '').replace(/^"([\s\S]*)"$/, '$1').trim();
@@ -1041,9 +1072,12 @@ async function askAssistant(asked) {
     const strip = t => t.replace(/(^|\s)@ai\b[,:]?/ig, ' ').replace(/\s+/g, ' ').trim();
     const question = strip(asked).slice(0, 2000) || 'Hello';
     // People's messages only: small models tend to repeat their own earlier replies when shown them.
-    const earlier = items.filter(it => it.kind === 'msg' && !it.bot && !expired(it.ts) && it.text).slice(-7, -1)
-      .map(it => strip(it.text).slice(0, 300)).filter(Boolean);
-    const r = await ai.engine.chat.completions.create({ messages: aiMessages(question, earlier), temperature: 0.6, max_tokens: 300 });
+    const earlier = items.filter(it => it.kind === 'msg' && !it.bot && !expired(it.ts) && it.text).slice(0, -1)
+      .map(it => ({ name: it.name, text: strip(it.text).slice(0, 400) })).filter(m => m.text);
+    const ask = lines => ai.engine.chat.completions.create({ messages: aiMessages(question, lines), temperature: 0.4, max_tokens: 300 });
+    let lines = aiSelect(question, earlier), r;
+    try { r = await ask(lines); }
+    catch (e) { if (lines.length < 8) throw e; r = await ask(lines.slice(-Math.ceil(lines.length / 3))); }  // too long for the model: retry with the newest third
     const text = aiClean(String((r && r.choices && r.choices[0] && r.choices[0].message && r.choices[0].message.content) || '')).slice(0, 4000);
     if (text) await deliver({ t: 'msg', id: randId(8), from: myId, name: myName, ts: Date.now(), text, attachments: [], bot: true });
     else sys('The assistant had nothing to say.');

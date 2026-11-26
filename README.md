@@ -71,9 +71,10 @@ Add `--read-only` to see what happens when storage can't be used. Messages are h
 When `assistant` is on, each visitor's browser downloads a small language model in the background while they read the entry screen (a few hundred MB, once; the browser caches it). It runs entirely on the visitor's device using WebGPU through [WebLLM](https://github.com/mlc-ai/web-llm), in a background worker so the page stays responsive while it thinks. Nothing is sent to an AI service.
 
 - Write `@ai` in a message to ask it something. The reply is produced on the asker's own device and posted to the room, labelled with who asked.
-- It gets the question plus the last few messages from people as optional background. It is not shown its own earlier replies, so a follow-up should restate what it refers to.
+- **What it can see** is a choice next to the model picker. "The whole chat" hands it as much of the current window as fits its memory (about 4,000 tokens). "Only related messages" hands it the messages that share words with the question, their neighbours, and the last few, and switches to the whole chat when asked for a summary. "Automatic" picks the whole chat for the 1B models and related messages for the smaller ones.
+- It is not shown its own earlier replies, so a follow-up should restate what it refers to.
 - Each visitor can pick the model from a short list, on the entry screen or by tapping the assistant label in the room. The choice is remembered on their device, and a newly chosen model is downloaded once.
-- The models are small. Expect short, simple answers, and do not rely on them for facts, code or reasoning. In a side-by-side try, Qwen2.5 0.5B (the default) coped best with chat context, LFM2.5 350M was close, and SmolLM2 360M was the weakest but smallest.
+- The models are small. Expect short, simple answers, and do not rely on them for facts, code or reasoning. In a try with a 45-message planning chat, Gemma 3 1B used the history most reliably, Llama 3.2 1B was next, and the models at 0.5B and below often missed or mixed up details, including a plan that changed partway through.
 - Browsers without WebGPU, or with data saver on, skip the download and the chat works as normal.
 - On graphics hardware without 16-bit float support, the page switches to the 32-bit build of the same model automatically.
 
