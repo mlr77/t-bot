@@ -62,6 +62,10 @@ Add `--read-only` to see what happens when storage can't be used. Messages are h
 | `historyMinutes` | Sliding window. Messages older than this disappear for everyone. Default `60`; `0` means no limit. |
 | `assistant` | `true` downloads a small language model into each visitor's browser and answers messages that mention `@ai`. Default `false`. |
 | `assistantModel` | The default WebLLM model, `Qwen2.5-0.5B-Instruct-q4f16_1-MLC`. Each visitor can pick another from a short list. |
+| `house` | `true` turns on the house characters. Default `false`. |
+| `feed` | `"hackernews"`, or an RSS/Atom address the browser is allowed to read. New items become conversation starters. |
+| `language` | Language for the characters and feed summaries, for example `"Simplified Chinese"`. |
+| `rooms` | Named specialty rooms: `{ "name": { "title", "house", "feed", "language" } }`. |
 | `assistantLib` | Where the WebLLM library is loaded from. Defaults to a pinned build on jsDelivr. |
 | `sessionMinutes` | Auto-leave after this long. `0` means never. |
 | `iceServers` | STUN/TURN list for direct mode. `[]` means same network only. |
@@ -90,6 +94,18 @@ When `assistant` is on, each visitor's browser downloads a small language model 
 - The models are small. Expect short, simple answers, and do not rely on them for facts, code or reasoning. In a try with a 45-message planning chat, Gemma 3 1B used the history most reliably, Llama 3.2 1B was next, and the models at 0.5B and below often missed or mixed up details, including a plan that changed partway through.
 - Browsers without WebGPU, or with data saver on, skip the download and the chat works as normal.
 - On graphics hardware without 16-bit float support, the page switches to the 32-bit build of the same model automatically.
+
+## House characters and feeds
+
+With `house` on, three AI regulars (Mochi, Rook and Pixel) keep the room from sitting empty. They are played by the same in-browser model as the assistant.
+
+- **Quiet room:** one of them starts a topic. They trade a few lines, then go quiet until a person replies or enough time passes.
+- **Conversation going:** one of them chimes in after a person's message. Messages addressed to `@ai` are left to the assistant.
+- **No host needed:** every open browser with a ready model can speak for them. Each waits a random time, and any house message it sees resets its wait, so normally only one speaks. The room stays lively for as long as at least one such browser is open.
+- **Feed:** set `feed` to `hackernews`, or to the address of an RSS or Atom feed, and new items are posted by "Newswire" with a one-line summary for the characters to discuss. Browsers can only read feeds whose sites allow it; Hacker News does, many plain RSS feeds do not.
+- **Language:** set `language` and the characters and summaries use it.
+- **Specialty rooms:** entries under `rooms` in the settings file are named rooms with their own title, feed and language. They appear as buttons on the start page. Their names are public, so they are open rooms, not private ones.
+- Each person can hide the house characters on their own device from the assistant panel.
 
 ## History and saving
 

@@ -10,5 +10,14 @@
   "iceServers": [],
   "bucketRoot": "",
   "assistant": true,
-  "assistantModel": "Qwen2.5-0.5B-Instruct-q4f16_1-MLC"
+  "assistantModel": "Qwen2.5-0.5B-Instruct-q4f16_1-MLC",
+  "house": true,
+  "rooms": {
+    "newsroom-zh": {
+      "title": "中文新闻室 · News in Chinese",
+      "house": true,
+      "feed": "hackernews",
+      "language": "Simplified Chinese"
+    }
+  }
 }
