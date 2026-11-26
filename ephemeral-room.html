@@ -1048,7 +1048,8 @@ function aiSelect(question, msgs) {
     const qw = new Set(aiWords(question));
     const top = msgs.map((m, i) => ({ i, s: aiWords(m.text).filter(w => qw.has(w)).length })).filter(x => x.s > 0)
       .sort((a, b) => b.s - a.s || b.i - a.i).slice(0, 5);
-    const keep = new Set(msgs.map((m, i) => i).slice(-4));          // always the last few
+    if (!top.length) return [];                                      // nothing related: ask the question on its own
+    const keep = new Set(msgs.map((m, i) => i).slice(-4));          // plus the last few
     for (const { i } of top) for (const j of [i - 1, i, i + 1]) if (j >= 0 && j < msgs.length) keep.add(j);
     sel = msgs.filter((m, i) => keep.has(i));
   }
@@ -1060,7 +1061,7 @@ function aiSelect(question, msgs) {
 function aiMessages(question, lines) {
   return [
     { role: 'system', content: 'You are a friendly, concise assistant in a group chat. Answer the question directly.' },
-    { role: 'user', content: (lines.length ? 'Chat log, oldest first. Later messages override earlier ones.\n' + lines.join('\n') + '\n\nUsing the chat log, answer: ' : '') + question },
+    { role: 'user', content: (lines.length ? 'Background chat log, oldest first. Later messages override earlier ones.\n' + lines.join('\n') + '\n\nNow answer this, using the chat log only if it is relevant: ' : '') + question },
   ];
 }
 const aiClean = text => text.trim().replace(/^(ai|assistant)\s*:\s*/i, '').replace(/^"([\s\S]*)"$/, '$1').trim();
