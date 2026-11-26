@@ -1040,8 +1040,9 @@ async function askAssistant(asked) {
   try {
     const strip = t => t.replace(/(^|\s)@ai\b[,:]?/ig, ' ').replace(/\s+/g, ' ').trim();
     const question = strip(asked).slice(0, 2000) || 'Hello';
-    const earlier = items.filter(it => it.kind === 'msg' && !expired(it.ts) && it.text).slice(-7, -1)
-      .map(it => (it.bot ? '(assistant) ' : '') + strip(it.text).slice(0, 300)).filter(Boolean);
+    // People's messages only: small models tend to repeat their own earlier replies when shown them.
+    const earlier = items.filter(it => it.kind === 'msg' && !it.bot && !expired(it.ts) && it.text).slice(-7, -1)
+      .map(it => strip(it.text).slice(0, 300)).filter(Boolean);
     const r = await ai.engine.chat.completions.create({ messages: aiMessages(question, earlier), temperature: 0.6, max_tokens: 300 });
     const text = aiClean(String((r && r.choices && r.choices[0] && r.choices[0].message && r.choices[0].message.content) || '')).slice(0, 4000);
     if (text) await deliver({ t: 'msg', id: randId(8), from: myId, name: myName, ts: Date.now(), text, attachments: [], bot: true });

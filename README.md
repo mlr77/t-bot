@@ -71,7 +71,7 @@ Add `--read-only` to see what happens when storage can't be used. Messages are h
 When `assistant` is on, each visitor's browser downloads a small language model in the background while they read the entry screen (a few hundred MB, once; the browser caches it). It runs entirely on the visitor's device using WebGPU through [WebLLM](https://github.com/mlc-ai/web-llm), in a background worker so the page stays responsive while it thinks. Nothing is sent to an AI service.
 
 - Write `@ai` in a message to ask it something. The reply is produced on the asker's own device and posted to the room, labelled with who asked.
-- It gets the question plus the last few messages as optional background.
+- It gets the question plus the last few messages from people as optional background. It is not shown its own earlier replies, so a follow-up should restate what it refers to.
 - Each visitor can pick the model from a short list, on the entry screen or by tapping the assistant label in the room. The choice is remembered on their device, and a newly chosen model is downloaded once.
 - The models are small. Expect short, simple answers, and do not rely on them for facts, code or reasoning. In a side-by-side try, Qwen2.5 0.5B (the default) coped best with chat context, LFM2.5 350M was close, and SmolLM2 360M was the weakest but smallest.
 - Browsers without WebGPU, or with data saver on, skip the download and the chat works as normal.
