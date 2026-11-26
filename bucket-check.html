@@ -1,0 +1,68 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; connect-src 'self'">
+<title>Bucket check</title>
+<style>
+  body { font: 16px/1.5 system-ui, sans-serif; margin: 20px; max-width: 640px; }
+  li { margin: 6px 0; } .ok { color: #0f6e5c; } .bad { color: #b3401c; } code { font-size: 14px; }
+</style>
+</head>
+<body>
+<h1>Bucket check</h1>
+<p>Tests the five things the chat page needs from this bucket. It writes one small test file and deletes it again.</p>
+<ol id="steps"></ol>
+<p id="verdict"></p>
+<script>
+'use strict';
+// Upload this file to the same folder as the chat page and open it while signed in.
+// Set ROOT to '/' or '/my-bucket/' to skip auto-detection.
+const ROOT = '';
+const FOLDER = '_ephemeral-room/_check/';
+const line = (text, ok) => { const li = document.createElement('li'); li.className = ok ? 'ok' : 'bad'; li.textContent = (ok ? 'Pass: ' : 'Fail: ') + text; document.getElementById('steps').append(li); return ok; };
+const encPath = p => p.split('/').map(encodeURIComponent).join('/');
+
+async function list(root, prefix) {
+  const r = await fetch(encPath(root) + '?list-type=2&prefix=' + encodeURIComponent(prefix), { cache: 'no-store' });
+  if (!r.ok) return { err: 'HTTP ' + r.status };
+  const doc = new DOMParser().parseFromString(await r.text(), 'application/xml');
+  if (!doc.documentElement || doc.documentElement.localName !== 'ListBucketResult') return { err: 'the reply was not an S3-style file listing' };
+  return { keys: [...doc.getElementsByTagNameNS('*', 'Key')].map(k => k.textContent) };
+}
+(async () => {
+  let path = location.pathname; try { path = decodeURIComponent(path); } catch {}
+  const segs = path.split('/').filter(Boolean);
+  const roots = ROOT ? [ROOT] : ['/'].concat(segs.length > 1 ? ['/' + segs[0] + '/'] : []);
+  let root = null, prefix = '', why = '';
+  for (const r of roots) {
+    const rel = path.startsWith(r) ? path.slice(r.length) : '';
+    const p = rel.slice(0, rel.lastIndexOf('/') + 1) + FOLDER;
+    const res = await list(r, p).catch(e => ({ err: 'network error' }));
+    if (res.keys) { root = r; prefix = p; break; }
+    why += ' [' + r + ': ' + res.err + ']';
+  }
+  if (!line(root ? 'list files (bucket root is ' + root + ')' : 'list files.' + why, !!root)) return done(false);
+  const key = prefix + 'test-' + Math.random().toString(36).slice(2), url = encPath(root + key), body = 'hello ' + Date.now();
+  let ok = true, r;
+  r = await fetch(url, { method: 'PUT', body, headers: { 'Content-Type': 'text/plain' }, cache: 'no-store' }).catch(() => null);
+  ok = line('write a file' + (r && r.ok ? '' : ' (' + (r ? 'HTTP ' + r.status : 'network error') + ')'), !!(r && r.ok)) && ok;
+  r = await fetch(url, { cache: 'no-store' }).catch(() => null);
+  const got = r && r.ok ? await r.text() : null;
+  ok = line('read it back' + (got === body ? '' : ' (' + (r ? 'HTTP ' + r.status : 'network error') + ')'), got === body) && ok;
+  const seen = (await list(root, prefix).catch(() => ({}))).keys || [];
+  ok = line('see it in the listing', seen.includes(key)) && ok;
+  r = await fetch(url, { method: 'DELETE', cache: 'no-store' }).catch(() => null);
+  const after = (await list(root, prefix).catch(() => ({}))).keys || [key];
+  ok = line('delete it' + (r && r.ok ? '' : ' (' + (r ? 'HTTP ' + r.status : 'network error') + ')'), !!(r && r.ok) && !after.includes(key)) && ok;
+  done(ok);
+})();
+function done(ok) {
+  document.getElementById('verdict').textContent = ok
+    ? 'All good. The chat page can use this bucket.'
+    : 'The chat page will fall back to invite codes until the failed step is fixed.';
+}
+</script>
+</body>
+</html>

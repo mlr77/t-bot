@@ -1,0 +1,1048 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="referrer" content="no-referrer">
+<!-- The content security policy is added by script once the transport is known (see applyCsp). -->
+<title>Ephemeral Room</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --panel: #ffffff; --ink: #1c1b19; --muted: #6d6a63;
+    --line: #dedbd3; --accent: #0f6e5c; --accent-ink: #ffffff; --mine: #e6f2ee; --warn: #9a3b1c;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #141513; --panel: #1d1f1c; --ink: #ecebe6; --muted: #9a988f;
+      --line: #30332e; --accent: #4fc3a8; --accent-ink: #0c1a16; --mine: #1b2b27; --warn: #f0906c;
+    }
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: var(--ink); font: 16px/1.45 var(--sans); display: flex; flex-direction: column; }
+  button, input, textarea { font: inherit; color: inherit; }
+  button {
+    border: 1px solid var(--line); background: var(--panel); border-radius: 8px;
+    padding: 8px 12px; cursor: pointer; min-height: 40px;
+  }
+  button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 600; }
+  button:disabled { opacity: .5; cursor: default; }
+  button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  input, textarea {
+    width: 100%; border: 1px solid var(--line); background: var(--panel);
+    border-radius: 8px; padding: 10px 12px;
+  }
+  textarea { resize: vertical; }
+  .hidden { display: none !important; }
+
+  header {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    padding: 10px 12px; padding-top: max(10px, env(safe-area-inset-top));
+    border-bottom: 1px solid var(--line); background: var(--panel);
+  }
+  header h1 { font-size: 16px; margin: 0; flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  header h1 span { color: var(--muted); font-weight: 400; }
+  #peers { display: flex; gap: 6px; flex-wrap: wrap; padding: 8px 12px; border-bottom: 1px solid var(--line); font-size: 13px; }
+  .chip { border: 1px solid var(--line); border-radius: 999px; padding: 2px 10px; background: var(--panel); }
+  .chip.me { border-color: var(--accent); }
+  .chip.wait { color: var(--muted); border-style: dashed; }
+  #mode { margin-left: auto; color: var(--muted); align-self: center; }
+
+  #log { flex: 1 1 auto; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .sys { color: var(--muted); font-size: 13px; text-align: center; }
+  .msg { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 10px; max-width: 100%; }
+  .msg.mine { background: var(--mine); }
+  .msg.bot { border-left: 3px solid var(--accent); }
+  #gate ul { margin: 0; padding-left: 20px; color: var(--muted); font-size: 14px; }
+  #aiStatus { font-size: 12px; }
+  .msg .meta { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .msg .meta b { color: var(--ink); font-weight: 600; }
+  .msg .meta button { margin-left: auto; min-height: 28px; padding: 2px 8px; font-size: 12px; }
+  .msg pre {
+    margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere;
+    font: 14px/1.45 var(--mono); max-height: 50vh; overflow-y: auto;
+  }
+  #empty { margin: auto; text-align: center; color: var(--muted); max-width: 32ch; }
+
+  #composer {
+    display: flex; gap: 8px; align-items: flex-end; padding: 10px 12px;
+    padding-bottom: max(10px, env(safe-area-inset-bottom));
+    border-top: 1px solid var(--line); background: var(--panel);
+  }
+  #composer textarea { font-family: var(--mono); font-size: 14px; max-height: 40vh; min-height: 44px; }
+
+  #gate { margin: auto; padding: 20px; width: min(420px, 100%); display: grid; gap: 12px; }
+  #gate h2 { margin: 0; font-size: 22px; }
+  #gate p { margin: 0; color: var(--muted); }
+
+  dialog {
+    border: 1px solid var(--line); border-radius: 12px; background: var(--bg); color: var(--ink);
+    width: min(520px, calc(100% - 24px)); padding: 16px; max-height: calc(100% - 24px);
+  }
+  dialog::backdrop { background: rgba(0,0,0,.45); }
+  dialog h2 { margin: 0 0 4px; font-size: 18px; }
+  dialog h3 { margin: 16px 0 6px; font-size: 14px; }
+  dialog p { margin: 0 0 8px; color: var(--muted); font-size: 14px; }
+  dialog textarea { font: 12px/1.35 var(--mono); height: 92px; word-break: break-all; }
+  .row { display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap; }
+  #status { min-height: 1.4em; font-size: 14px; margin-top: 10px; }
+  #status.err { color: var(--warn); }
+
+  #composer {display:grid; gap:8px; width:min(900px,100%); margin:0 auto; border:1px solid var(--line); border-radius:14px 14px 0 0;}
+  #composer textarea {border:0; background:transparent; font-family:var(--sans); resize:none;}
+  .tools,#drafts {display:flex; gap:6px; align-items:center; flex-wrap:wrap;}
+  .tools button {font-size:13px; min-height:36px;} #sendBtn {margin-left:auto;} #draftStatus {font-size:12px;color:var(--muted);}
+  #log {width:min(900px,100%);margin:auto;} .msg {border:0;border-bottom:1px solid var(--line);border-radius:8px;padding:14px;}
+  .msg .body {white-space:pre-wrap;overflow-wrap:anywhere;margin:8px 0;}
+  .attachment {display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:8px;padding:8px;margin:6px 0;flex-wrap:wrap;overflow-wrap:anywhere;}
+  .attachment img {max-width:100%;max-height:240px;object-fit:contain;border-radius:6px;} .attachment pre {width:100%;background:var(--bg);padding:10px;border-radius:6px;}
+  .attachment button {font-size:12px;min-height:30px;} .attachment small {color:var(--muted);} .drag {outline:2px dashed var(--accent);}
+  #drafts:empty {display:none;} #drafts .attachment {margin:0;max-width:100%;} #drafts img {max-height:60px;max-width:90px;}
+
+#explorer{position:absolute;top:105px;bottom:145px;left:0;width:min(290px,85vw);z-index:4;background:var(--panel);border:1px solid var(--line);padding:12px;overflow:auto;box-shadow:0 8px 24px #0003} #explorer h3{font-size:12px;letter-spacing:1px} #fileList button{display:block;width:100%;text-align:left;margin:5px 0;overflow-wrap:anywhere} #gate select{width:100%;padding:10px 12px;border-radius:8px} #gateConfig{font-size:12px} select{background:var(--panel);color:var(--ink);padding:6px;border:1px solid var(--line)} .kw{color:#b66bd5} .str{color:#21865c} .num{color:#488ed2} .ln{color:var(--muted);user-select:none;display:inline-block;width:4ch} .codeview{white-space:pre;overflow:auto;max-height:45vh;font:13px/1.6 var(--mono)} .diffadd{background:#16864b33} .diffdel{background:#d74b4b33} #inspect img{max-width:100%;transform-origin:top left} #imageArea{overflow:auto;max-height:65vh} #diffDialog textarea{height:120px} #transfer{font-size:12px;color:var(--muted)} .body h3{margin:8px 0} .body p{margin:5px 0} .body table{border-collapse:collapse} .body td,.body th{border:1px solid var(--line);padding:5px} #composer{margin:8px;border:1px solid var(--line);border-radius:12px} #composer textarea{border:0} #roomName{font-size:11px} 
+</style>
+</head>
+<body>
+
+<!-- Name gate -->
+<form id="gate">
+  <h2>Ephemeral Room</h2>
+  <p id="gateBlurb">Loading room settings…</p>
+  <ul id="howto"></ul>
+  <label for="nameInput" id="nameLabel">Your name</label>
+  <input id="nameInput" maxlength="32" autocomplete="off">
+  <select id="nameSelect" class="hidden" aria-labelledby="nameLabel"></select>
+  <button class="primary" type="submit" id="enterBtn" disabled>Enter room</button><button type="button" id="newRoom">Create private room</button>
+  <p id="aiStatus" role="status"></p>
+  <p id="gateRoom"></p><p id="gateConfig"></p>
+</form>
+
+<!-- Room -->
+<header class="hidden" id="bar">
+  <h1>Room <span id="roomName"></span></h1>
+  <button id="connectBtn" class="primary hidden">Connect</button>
+  <button id="explore">Files</button><button id="shareLink">Copy link</button><button id="saveChat">Save chat</button><button id="leaveBtn">Leave</button>
+</header>
+<div id="peers" class="hidden" aria-label="People in this room"></div>
+<aside id="explorer" class="hidden"><h3>SESSION EXPLORER</h3><input id="searchFiles" placeholder="Filter files"><div id="fileList"></div></aside><main id="log" class="hidden" aria-live="polite">
+  <div id="empty">Checking shared storage…</div>
+</main>
+<form id="composer" class="hidden">
+  <div id="drafts" aria-label="Pending attachments"></div>
+  <textarea id="text" rows="2" placeholder="Message, paste code, or drop files…" aria-label="Message"></textarea>
+  <div class="tools"><button type="button" id="attach">＋ Add files</button><button type="button" id="code">&lt;/&gt; Code</button><button type="button" id="diffBtn">Compare</button><button type="button" id="pasteText">Paste as file</button><input type="file" id="files" multiple hidden><span id="draftStatus" role="status"></span><button class="primary" id="sendBtn" type="submit">Send ↑</button></div>
+</form>
+
+<!-- Connect dialog -->
+<dialog id="dlg">
+  <h2>Connect someone</h2>
+  <p>Two codes, one each way. After that, everyone already in the room links up automatically.</p>
+
+  <h3>1 · Start an invite</h3>
+  <p>Already in the room? Create an invite and send it to the person joining.</p>
+  <button id="inviteBtn">Create invite code</button>
+
+  <h3>2 · Paste a code you received</h3>
+  <p>Works for both an invite and the reply to your invite.</p>
+  <textarea id="codeIn" placeholder="Paste code here" aria-label="Code you received"></textarea>
+  <div class="row"><button id="useBtn" class="primary">Use code</button></div>
+
+  <div id="outWrap" class="hidden">
+    <h3 id="outLabel">Send this code</h3>
+    <textarea id="codeOut" readonly aria-label="Code to send"></textarea>
+    <div class="row"><button id="copyBtn">Copy code</button></div>
+  </div>
+
+  <div id="status" role="status"></div>
+  <div class="row"><button id="closeBtn">Close</button></div>
+</dialog>
+
+<dialog id="inspect"><h2 id="inspectTitle">Attachment</h2><div id="imageArea"></div><label>Zoom <input id="zoom" type="range" min="1" max="3" step=".1" value="1"></label><button onclick="this.closest('dialog').close()">Close</button></dialog><dialog id="diffDialog"><h2>Compare text</h2><textarea id="before" placeholder="Original"></textarea><textarea id="after" placeholder="Modified"></textarea><button id="runDiff">Compare</button><button id="attachDiff">Attach diff</button><button onclick="this.closest('dialog').close()">Close</button><pre id="diffOutput" class="codeview"></pre></dialog><div id="transfer" role="status"></div><script>
+'use strict';
+/* ---------------------------------------------------------------------------
+   Ephemeral Room — one static page plus an optional owner settings file.
+
+   SETTINGS: the page reads ephemeral-room.config.json from its own folder.
+   Whoever can write that file controls the room for everyone, so give write
+   access on it to the chat owner only. Any key may be omitted. Keys:
+     transport      "storage" (default), "relay" or "direct"
+     fallback       what to use when storage can't be reached: "direct"
+                    (default, invite codes) or "relay"
+     relayLib       where to load the Trystero library from (relay only)
+     relayAppId     namespace on the public relays (relay only)
+     defaultRoom    room used when the link has no #name ("" = new private room)
+     members        [] = anyone who can load the page; otherwise the names
+                    people pick from. This is a pick-list, not a lock: real
+                    access control is the bucket's own access list.
+     randomNames    true (default) = nobody types a name; everyone is shown
+                    under a random name derived from their session, so the
+                    room cannot tell who is who. Ignored when members is set.
+     keepHistory    false = wiped when the last person leaves; true = kept
+     historyMinutes messages older than this disappear for everyone (default
+                    60; 0 = no limit). Anyone can keep a copy with Save chat.
+     assistant      true = each browser downloads a small language model in
+                    the background and answers messages that mention @ai.
+                    Runs on the device (needs WebGPU); nothing is sent away.
+     assistantModel which WebLLM model to use
+     assistantLib   where to load the WebLLM library from
+     sessionMinutes auto-leave after this long (0 = never)
+     iceServers     STUN/TURN list for direct mode ([] = same network only)
+     bucketRoot     "" = auto-detect; "/" or "/my-bucket/" to force
+
+   STORAGE transport: each message is an encrypted object in
+   <page folder>/_ephemeral-room/<room id>/ and tabs poll that folder. Signed-in
+   users need list, read, write and delete there via same-origin requests.
+   RELAY transport: for hosts with no writable storage, such as GitHub Pages.
+   The Trystero library introduces browsers to each other through public Nostr
+   relays, then messages travel directly between browsers. Nothing is stored.
+   The relays see encrypted handshakes, IP addresses and timing, not content.
+   DIRECT transport (the last resort): WebRTC data channels in a full mesh,
+   bootstrapped by a manual code swap.
+   Everything is encrypted with a key derived from the room name (#fragment).
+--------------------------------------------------------------------------- */
+const CONFIG = {
+  // Where the S3-style API lives relative to this site.
+  // '' = auto-detect. '/' when this host IS the bucket; '/my-bucket/' for path-style.
+  bucketRoot: '',
+  configFile: 'ephemeral-room.config.json', // owner settings, next to this page
+  transport: 'storage',   // 'storage', 'relay' or 'direct'
+  fallback: 'direct',     // when storage can't be reached: 'direct' or 'relay'
+  relayLib: 'https://cdn.jsdelivr.net/npm/trystero@0.25.2/+esm', // pinned version
+  relayAppId: 't-bot-ephemeral-room',
+  members: [],            // [] = open to anyone who can load the page
+  randomNames: true,      // everyone appears under a random name (ignored if members is set)
+  keepHistory: false,     // true = history stays in the bucket between sessions
+  historyMinutes: 60,     // sliding window: older messages disappear; 0 = no limit
+  assistant: false,       // in-browser AI helper that answers when someone writes @ai
+  assistantModel: 'SmolLM2-360M-Instruct-q4f16_1-MLC',
+  assistantLib: 'https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.89/+esm', // pinned version
+  assistantName: 'Assistant',
+  sessionMinutes: 0,      // 0 = no auto-leave
+  historyLimit: 500,      // most recent messages loaded on entry
+  dataFolder: '_ephemeral-room/', // created next to this page
+  pollMs: 2000,           // how often to look for new messages
+  heartbeatMs: 15000,     // how often each tab says "still here"
+  liveMs: 150000,         // no heartbeat for this long = treated as gone
+  staleMs: 600000,        // leftovers older than this get cleaned up
+  // Direct mode only. [] = no outside servers, so only people on the same
+  // network can link up. Add your own STUN/TURN server to reach further.
+  iceServers: [],
+  iceGatherMs: 3000,      // max wait for network candidates
+  relayTimeoutMs: 30000,  // give up on an automatic link after this long
+  chunkChars: 8000,       // split big payloads to stay under channel limits
+  maxTextChars: 500000,   // largest single paste
+  defaultRoom: 'lobby',   // used when the link has no #name; '' = new private room
+};
+
+const $ = id => document.getElementById(id);
+const enc = new TextEncoder(), dec = new TextDecoder();
+const randId = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => b.toString(16).padStart(2, '0')).join('');
+
+let room = '', roomTag = '', roomLabel = '', configNote = '';
+const myId = randId(8);
+
+/* ---------- owner settings ---------- */
+async function loadConfig() {
+  if (/^https?:$/.test(location.protocol)) {
+    try {
+      const r = await fetch(CONFIG.configFile, { cache: 'no-store' });
+      if (r.ok) {
+        const c = JSON.parse(await r.text());
+        const str = (k, max) => { if (typeof c[k] === 'string' && c[k].length <= max) CONFIG[k] = c[k]; };
+        const num = (k, max) => { if (Number.isFinite(c[k]) && c[k] >= 0 && c[k] <= max) CONFIG[k] = c[k]; };
+        if (['storage', 'relay', 'direct'].includes(c.transport)) CONFIG.transport = c.transport;
+        if (c.fallback === 'relay' || c.fallback === 'direct') CONFIG.fallback = c.fallback;
+        str('defaultRoom', 64); str('bucketRoot', 200); str('relayLib', 300); str('relayAppId', 64);
+        if (typeof c.keepHistory === 'boolean') CONFIG.keepHistory = c.keepHistory;
+        if (typeof c.randomNames === 'boolean') CONFIG.randomNames = c.randomNames;
+        num('sessionMinutes', 1440);
+        if (Number.isFinite(c.maxAgeHours) && c.maxAgeHours > 0) CONFIG.historyMinutes = c.maxAgeHours * 60; // older name
+        num('historyMinutes', 5256000);
+        if (typeof c.assistant === 'boolean') CONFIG.assistant = c.assistant;
+        str('assistantModel', 120); str('assistantLib', 300); str('assistantName', 32);
+        if (Array.isArray(c.members)) CONFIG.members = c.members.filter(n => typeof n === 'string' && n.trim()).map(n => n.trim().slice(0, 32)).slice(0, 200);
+        if (Array.isArray(c.iceServers)) CONFIG.iceServers = c.iceServers;
+        configNote = 'Settings loaded from ' + CONFIG.configFile;
+      } else configNote = r.status === 404 ? 'No settings file found. Using built-in defaults.' : 'Settings file could not be read (' + r.status + '). Using built-in defaults.';
+    } catch { configNote = 'Settings file could not be loaded or is not valid JSON. Using built-in defaults.'; }
+  } else configNote = 'Opened as a local file. Using built-in defaults.';
+  try { room = decodeURIComponent(location.hash.slice(1)); } catch { room = location.hash.slice(1); }
+  room = room || CONFIG.defaultRoom;
+  if (!room) { room = 'room-' + randId(24); history.replaceState(null, '', '#' + room); }
+  const h = new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode('ephemeral-room/tag/' + room)));
+  roomTag = Array.from(h.slice(0, 10), b => b.toString(16).padStart(2, '0')).join('');
+  // A generated private room's name is its secret, so show a fingerprint instead.
+  roomLabel = /^room-[0-9a-f]{48}$/.test(room) ? 'private · ' + roomTag.slice(0, 4) : room;
+}
+const ready = loadConfig();
+const allowed = n => !CONFIG.members.length || CONFIG.members.includes(n);
+// Sliding window: anything older than historyMinutes is dropped everywhere.
+const windowMs = () => CONFIG.historyMinutes * 60000;
+const expired = ts => CONFIG.historyMinutes > 0 && ts < Date.now() - windowMs();
+
+/* ---------- random names ---------- */
+// With randomNames on, a name is never typed or trusted: every browser works
+// it out from the sender's random per-session id, so all tabs agree on it and
+// it changes each time someone re-enters.
+const ADJ = ['Amber','Brisk','Calm','Copper','Coral','Crimson','Dusty','Fern','Frosty','Gentle','Golden','Hazel','Indigo','Ivory','Jade','Lilac','Lunar','Maple','Misty','Mossy','Olive','Onyx','Pearl','Quiet','Rustic','Sandy','Silver','Slate','Sunny','Teal','Velvet','Windy'];
+const ANIMAL = ['Badger','Bison','Crane','Dolphin','Egret','Falcon','Ferret','Finch','Gecko','Heron','Ibis','Jackal','Koala','Lemur','Lynx','Marten','Moose','Narwhal','Ocelot','Osprey','Otter','Panda','Puffin','Quail','Raven','Seal','Stoat','Tapir','Turtle','Walrus','Wombat','Yak'];
+function anonName(id) {
+  let a = 2166136261, b = 5381;
+  for (let i = 0; i < id.length; i++) { const c = id.charCodeAt(i); a = Math.imul(a ^ c, 16777619) >>> 0; b = (Math.imul(b, 33) + c) >>> 0; }
+  return ADJ[a % ADJ.length] + ' ' + ANIMAL[b % ANIMAL.length];
+}
+const anon = () => CONFIG.randomNames && !CONFIG.members.length;
+const displayName = (id, name) => anon() ? anonName(String(id)) : cleanName(name);
+let myName = '';
+
+let mode = '';              // short label shown next to the people list
+const peers = new Map();    // id -> { id, name, pc, dc, open, everOpen }
+const pending = new Map();  // cid -> { pc, dc }  manual invites awaiting a reply
+const known = new Map();    // id -> name
+const seen = new Set();     // message ids
+const items = [];           // timeline: messages + system lines
+const partial = new Map();  // chunk reassembly
+
+/* ---------- crypto for the hand-carried codes ---------- */
+$('newRoom').onclick = () => { location.hash = 'room-' + randId(24); };
+const keyP = ready.then(async () => {
+  const base = await crypto.subtle.importKey('raw', enc.encode(room), 'PBKDF2', false, ['deriveKey']);
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt: enc.encode('ephemeral-room/v1'), iterations: 150000, hash: 'SHA-256' },
+    base, { name: 'AES-GCM', length: 256 }, false, ['encrypt', 'decrypt']);
+});
+
+async function pipe(bytes, transform) {
+  const s = new Blob([bytes]).stream().pipeThrough(transform);
+  return new Uint8Array(await new Response(s).arrayBuffer());
+}
+function b64u(bytes) {
+  let s = ''; for (const b of bytes) s += String.fromCharCode(b);
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function unb64u(str) {
+  const s = atob(str.replace(/-/g, '+').replace(/_/g, '/'));
+  const out = new Uint8Array(s.length); for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+  return out;
+}
+async function seal(obj) {
+  const plain = await pipe(enc.encode(JSON.stringify(obj)), new CompressionStream('deflate-raw'));
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ct = new Uint8Array(await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, await keyP, plain));
+  const out = new Uint8Array(12 + ct.length); out.set(iv); out.set(ct, 12);
+  return b64u(out);
+}
+async function unseal(code) {
+  const raw = unb64u(code.replace(/\s+/g, ''));
+  const plain = new Uint8Array(await crypto.subtle.decrypt({ name: 'AES-GCM', iv: raw.slice(0, 12) }, await keyP, raw.slice(12)));
+  return JSON.parse(dec.decode(await pipe(plain, new DecompressionStream('deflate-raw'))));
+}
+
+/* ---------- bucket transport ---------- */
+const bucket = { on: false, root: '', prefix: '', present: new Map(), names: new Map(),
+                 fetched: new Set(), gone: new Set(), keys: [], fails: 0, first: true, why: '' };
+const objUrl = name => bucket.root + bucket.prefix.split('/').map(encodeURIComponent).join('/') + name;
+
+async function bList(root, prefix) {
+  const out = []; let token = '', marker = '', serverNow = Date.now();
+  const tag = (el, n) => { const x = el.getElementsByTagNameNS('*', n)[0]; return x ? x.textContent : ''; };
+  for (let page = 0; page < 20; page++) {
+    let u = root + '?list-type=2&prefix=' + encodeURIComponent(prefix);
+    if (token) u += '&continuation-token=' + encodeURIComponent(token);
+    if (marker) u += '&marker=' + encodeURIComponent(marker);
+    const r = await fetch(u, { cache: 'no-store' });
+    if (!r.ok) throw new Error('listing files was refused (' + r.status + ')');
+    const d = Date.parse(r.headers.get('date') || ''); if (!isNaN(d)) serverNow = d;
+    const doc = new DOMParser().parseFromString(await r.text(), 'application/xml');
+    const top = doc.documentElement;
+    if (!top || top.localName !== 'ListBucketResult') throw new Error('the storage did not answer a file-listing request');
+    let lastKey = '';
+    for (const c of top.getElementsByTagNameNS('*', 'Contents')) {
+      const key = lastKey = tag(c, 'Key');
+      if (key.startsWith(prefix)) out.push({ name: key.slice(prefix.length), lm: Date.parse(tag(c, 'LastModified')) || serverNow });
+    }
+    if (tag(top, 'IsTruncated') !== 'true') break;
+    token = tag(top, 'NextContinuationToken');
+    if (!token) { marker = lastKey; if (!marker) break; }
+  }
+  return { out, serverNow };
+}
+async function bPut(name, body, keepalive) {
+  const r = await fetch(objUrl(name), { method: 'PUT', body, headers: { 'Content-Type': 'text/plain' }, cache: 'no-store', keepalive: !!keepalive });
+  if (!r.ok) throw new Error('saving files was refused (' + r.status + ')');
+}
+async function bGet(name) {  // null = gone
+  const r = await fetch(objUrl(name), { cache: 'no-store' });
+  if (r.status === 404 || r.status === 403) return null;
+  if (!r.ok) throw new Error('read failed (' + r.status + ')');
+  return r.text();
+}
+function bDel(name, keepalive) {
+  return fetch(objUrl(name), { method: 'DELETE', cache: 'no-store', keepalive: !!keepalive }).catch(() => {});
+}
+async function heartbeat(strict) {
+  try { await bPut('p-' + myId, await seal({ id: myId, name: myName })); }
+  catch (e) { if (strict) throw e; }
+}
+async function startBucket() {
+  if (!/^https?:$/.test(location.protocol)) { bucket.why = 'this page was opened as a local file'; return false; }
+  let path = location.pathname; try { path = decodeURIComponent(path); } catch {}
+  const segs = path.split('/').filter(Boolean);
+  const roots = CONFIG.bucketRoot ? [CONFIG.bucketRoot] : ['/'].concat(segs.length > 1 ? ['/' + segs[0] + '/'] : []);
+  const tag = roomTag;
+  for (const root of roots) {
+    const rel = path.startsWith(root) ? path.slice(root.length) : '';
+    const prefix = rel.slice(0, rel.lastIndexOf('/') + 1) + CONFIG.dataFolder + tag + '/';
+    try {
+      await bList(root.split('/').map(encodeURIComponent).join('/'), prefix);
+      bucket.root = root.split('/').map(encodeURIComponent).join('/'); bucket.prefix = prefix;
+      await heartbeat(true);
+      bucket.on = true;
+      await poll().catch(() => {});
+      setTimeout(loop, CONFIG.pollMs);
+      setInterval(() => { if (bucket.on) heartbeat(); }, CONFIG.heartbeatMs);
+      return true;
+    } catch (e) { bucket.why = e.message || 'network error'; }
+  }
+  return false;
+}
+async function poll() {
+  const { out, serverNow } = await bList(bucket.root, bucket.prefix);
+  if (!bucket.on) return;
+  bucket.keys = out.map(o => o.name);
+  const live = new Set();
+  for (const o of out) {
+    if (!o.name.startsWith('p-') || o.name === 'p-' + myId) continue;
+    const age = serverNow - o.lm;
+    if (age < CONFIG.liveMs) live.add(o.name.slice(2));
+    else if (age > CONFIG.staleMs) bDel(o.name);
+  }
+  for (const id of live) if (!bucket.names.has(id)) {
+    try { bucket.names.set(id, displayName(id, (await unseal(await bGet('p-' + id))).name)); }
+    catch { live.delete(id); }
+  }
+  for (const id of [...live]) if (!allowed(bucket.names.get(id))) live.delete(id);
+  for (const id of live) if (!bucket.present.has(id)) {
+    bucket.present.set(id, bucket.names.get(id));
+    if (!bucket.first) sys(bucket.names.get(id) + ' joined');
+  }
+  for (const [id, name] of [...bucket.present]) if (!live.has(id)) {
+    bucket.present.delete(id); bucket.names.delete(id); sys(name + ' left');
+  }
+  if (bucket.first && live.size === 0 && !CONFIG.keepHistory) {
+    // Nobody is here: clear anything a crashed tab left behind.
+    for (const o of out) if (o.name !== 'p-' + myId) { bucket.fetched.add(o.name); bDel(o.name); }
+  } else {
+    const cutoff = CONFIG.historyMinutes ? Date.now() - windowMs() : 0;
+    if (cutoff) for (const o of out) {   // expired messages are deleted from the bucket, not shown
+      if (!o.name.startsWith('m-') || !(parseInt(o.name.slice(2, 11), 36) < cutoff) || bucket.gone.has(o.name)) continue;
+      bucket.gone.add(o.name); bucket.fetched.add(o.name); bDel(o.name);
+    }
+    let fresh = out.map(o => o.name).filter(n => n.startsWith('m-') && !bucket.fetched.has(n)).sort();
+    if (bucket.first && fresh.length > CONFIG.historyLimit) {
+      for (const n of fresh.slice(0, -CONFIG.historyLimit)) bucket.fetched.add(n);
+      fresh = fresh.slice(-CONFIG.historyLimit);
+    }
+    for (let i = 0; i < fresh.length; i += 6) await Promise.all(fresh.slice(i, i + 6).map(async n => {
+      bucket.fetched.add(n);
+      let body;
+      try { body = await bGet(n); } catch { bucket.fetched.delete(n); return; }  // retry next poll
+      if (body === null) return;
+      try { acceptMsg(await unseal(body)); } catch {}
+    }));
+  }
+  bucket.first = false;
+  renderPeers();
+}
+async function loop() {
+  if (!bucket.on) return;
+  try {
+    await poll();
+    if (bucket.fails >= 3) sys('Back in touch with shared storage.');
+    bucket.fails = 0;
+  } catch (e) {
+    if (++bucket.fails === 3) sys('Lost contact with shared storage. Still trying. If this continues, reload and sign in again.');
+  }
+  setTimeout(loop, document.hidden ? CONFIG.pollMs * 3 : CONFIG.pollMs);
+}
+function leaveBucket(keepalive) {
+  if (!bucket.on) return [];
+  bucket.on = false;
+  const mine = 'p-' + myId;
+  // Last one out wipes the room, unless the owner chose to keep history.
+  const names = bucket.present.size === 0 && !CONFIG.keepHistory ? [...new Set([...bucket.keys, ...bucket.fetched, mine])] : [mine];
+  return names.map(n => bDel(n, keepalive));
+}
+
+/* ---------- content security policy ---------- */
+// Applied once, as soon as the transport is known, so the strict policy stays
+// in force everywhere except when the relay transport is actually in use.
+let cspDone = false;
+const ai = { state: 'off', pct: 0, engine: null, worker: null, model: '', why: '', busy: false };
+function applyCsp(forRelay) {
+  if (cspDone) return; cspDone = true;
+  const origin = u => { try { return new URL(u, location.href).origin; } catch { return ''; } };
+  const script = ["'unsafe-inline'"], connect = ["'self'"]; let worker = '';
+  if (forRelay) { script.push(origin(CONFIG.relayLib)); connect.push('wss:', origin(CONFIG.relayLib)); }
+  if (CONFIG.assistant && ai.state !== 'unsupported') {
+    // The model library compiles WebAssembly and fetches model files from its hosts.
+    script.push("'wasm-unsafe-eval'", origin(CONFIG.assistantLib), 'https://cdn.jsdelivr.net', 'blob:');
+    connect.push('https:', 'blob:', 'data:');
+    worker = '; worker-src blob: ' + origin(CONFIG.assistantLib);
+  }
+  const m = document.createElement('meta');
+  m.httpEquiv = 'Content-Security-Policy';
+  m.content = "default-src 'none'; style-src 'unsafe-inline'; img-src blob:; script-src " + [...new Set(script)].join(' ') +
+    '; connect-src ' + [...new Set(connect)].join(' ') + worker;
+  document.head.append(m);
+}
+
+/* ---------- relay transport (Trystero over public Nostr relays) ---------- */
+const relay = { on: false, room: null, msg: null, hello: null, names: new Map(), why: '' };
+async function startRelay() {
+  applyCsp(true);
+  const lib = await Promise.race([
+    import(new URL(CONFIG.relayLib, location.href).href),
+    new Promise((_, no) => setTimeout(() => no(new Error('the relay library did not load in time')), 12000)),
+  ]);
+  if (typeof lib.joinRoom !== 'function') throw new Error('the relay library is not the expected version');
+  // The room name is the password, so relays only ever see encrypted handshakes,
+  // and the room is addressed by its hash, not its name.
+  const cfg = { appId: CONFIG.relayAppId, password: room };
+  if (CONFIG.iceServers.length) cfg.rtcConfig = { iceServers: CONFIG.iceServers };
+  const r = lib.joinRoom(cfg, roomTag, { onJoinError: d => console.warn('relay join error', d && d.error) });
+  relay.msg = r.makeAction('msg'); relay.hello = r.makeAction('hello');
+  relay.hello.onMessage = (d, ctx) => {
+    const id = ctx && ctx.peerId, name = displayName(d && typeof d.id === 'string' ? d.id.slice(0, 64) : '', d && d.name);
+    if (!id || !allowed(name)) return;
+    const isNew = !relay.names.has(id);
+    relay.names.set(id, name);
+    if (isNew) sys(name + ' joined');
+    renderPeers();
+  };
+  relay.msg.onMessage = m => { if (m && typeof m === 'object') acceptMsg(m); };
+  r.onPeerJoin = id => {   // greet, and bring a newcomer up to date
+    Promise.resolve(relay.hello.send({ name: myName, id: myId }, { target: id })).catch(() => {});
+    for (const it of items) if (it.kind === 'msg' && !expired(it.ts)) Promise.resolve(relay.msg.send(wire(it), { target: id })).catch(() => {});
+  };
+  r.onPeerLeave = id => {
+    const name = relay.names.get(id);
+    if (name === undefined) return;
+    relay.names.delete(id); sys(name + ' left'); renderPeers();
+  };
+  relay.room = r; relay.on = true;
+}
+function relayPeerCount() {
+  const ps = relay.room.getPeers();
+  return ps instanceof Map ? ps.size : Object.keys(ps || {}).length;
+}
+async function chooseTransport() {
+  if (CONFIG.transport === 'storage' && await startBucket().catch(e => { bucket.why = e.message; return false; })) { applyCsp(false); return 'storage'; }
+  if (CONFIG.transport === 'relay' || (CONFIG.transport === 'storage' && CONFIG.fallback === 'relay')) {
+    try { await startRelay(); return 'relay'; } catch (e) { relay.why = e.message || 'the relay library could not be loaded'; }
+  }
+  applyCsp(false);
+  return 'direct';
+}
+
+/* ---------- WebRTC plumbing ---------- */
+const newPc = () => new RTCPeerConnection({ iceServers: CONFIG.iceServers });
+
+function gathered(pc) {
+  return new Promise(res => {
+    if (pc.iceGatheringState === 'complete') return res();
+    const done = () => { clearTimeout(t); pc.removeEventListener('icegatheringstatechange', chk); res(); };
+    const chk = () => { if (pc.iceGatheringState === 'complete') done(); };
+    const t = setTimeout(done, CONFIG.iceGatherMs);
+    pc.addEventListener('icegatheringstatechange', chk);
+  });
+}
+async function makeOffer(pc) {
+  const dc = pc.createDataChannel('room');
+  await pc.setLocalDescription(await pc.createOffer());
+  await gathered(pc);
+  return { dc, sdp: pc.localDescription.sdp };
+}
+async function makeAnswer(pc, sdp) {
+  await pc.setRemoteDescription({ type: 'offer', sdp });
+  await pc.setLocalDescription(await pc.createAnswer());
+  await gathered(pc);
+  return pc.localDescription.sdp;
+}
+
+function register(id, name, pc) {
+  const p = { id, name: displayName(id, name), pc, dc: null, open: false, everOpen: false };
+  peers.set(id, p);
+  pc.addEventListener('datachannel', e => bindChannel(p, e.channel));
+  pc.addEventListener('connectionstatechange', () => {
+    if (pc.connectionState === 'closed' || (pc.connectionState === 'failed' && p.everOpen)) drop(p);
+  });
+  renderPeers();
+  return p;
+}
+function bindChannel(p, dc) {
+  p.dc = dc;
+  const opened = () => {
+    if (p.open) return;
+    p.open = p.everOpen = true;
+    known.set(p.id, p.name);
+    sys(p.name + ' connected');
+    send(p, { t: 'hello', name: myName, roster: roster() });
+    for (const it of items) if (it.kind === 'msg' && !expired(it.ts)) send(p, wire(it));
+    for (const q of peers.values()) if (q !== p && q.open) send(q, { t: 'roster', roster: roster() });
+    renderPeers();
+  };
+  dc.addEventListener('open', opened);
+  dc.addEventListener('message', e => onRaw(p, e.data));
+  dc.addEventListener('close', () => drop(p));
+  if (dc.readyState === 'open') opened();
+}
+function drop(p, quiet) {
+  if (peers.get(p.id) !== p) return;
+  peers.delete(p.id);
+  try { p.dc && p.dc.close(); } catch {}
+  try { p.pc.close(); } catch {}
+  if (p.everOpen && !quiet) sys(p.name + ' left');
+  if (p.everOpen) known.delete(p.id);
+  renderPeers();
+}
+
+/* ---------- wire protocol ---------- */
+function send(p,obj){
+ if(!p.open||p.dc.readyState!=='open')return Promise.resolve(false);
+ const task=async()=>{const dc=p.dc,s=JSON.stringify(obj),c=randId(4),n=Math.ceil(s.length/CONFIG.chunkChars);try{for(let i=0;i<n;i++){while(dc.bufferedAmount>262144){if(dc.readyState!=='open')throw Error('Disconnected');await new Promise(r=>setTimeout(r,30));}dc.send(n===1?s:JSON.stringify({t:'c',c,i,n,d:s.slice(i*CONFIG.chunkChars,(i+1)*CONFIG.chunkChars)}));if(n>1)$('transfer').textContent=`Queuing to ${p.name}: ${Math.round((i+1)/n*100)}%`;}if(n>1)$('transfer').textContent='Queued to channel · awaiting receipt';return true;}catch(e){$('transfer').textContent='Transfer interrupted';return false;}};
+ p.queue=(p.queue||Promise.resolve()).then(task);return p.queue;
+}
+function onRaw(p, data) {
+  let m; try { m = JSON.parse(data); } catch { return; }
+  if (!m || typeof m !== 'object') return;
+  if (m.t === 'c') {
+    if (!(m.n > 0 && m.n <= 800) || !(m.i >= 0 && m.i < m.n) || typeof m.d !== 'string' || m.d.length > CONFIG.chunkChars || !Number.isInteger(m.n) || !Number.isInteger(m.i) || typeof m.c !== 'string' || m.c.length > 32) return;
+    const k = p.id + ':' + m.c;
+    let a = partial.get(k); if (!a) { if(partial.size>=16)return; partial.set(k, a = { parts: [], got: 0 }); setTimeout(()=>{if(partial.get(k)===a)partial.delete(k);},60000); } if(a.parts.length>m.n)return;
+    if (a.parts[m.i] === undefined) { a.parts[m.i] = m.d; a.got++; }
+    if (a.got < m.n) return;
+    partial.delete(k);
+    try { m = JSON.parse(a.parts.join('')); } catch { return; }
+    if (!m || typeof m !== 'object') return;
+  }
+  handle(p, m);
+}
+function handle(p, m) {
+  switch (m.t) {
+    case 'hello':
+      p.name = displayName(p.id, m.name); known.set(p.id, p.name); renderPeers();
+      mergeRoster(m.roster, p); break;
+    case 'roster': mergeRoster(m.roster, p); break;
+    case 'ack': $('transfer').textContent='Receipt confirmed by '+p.name; break;
+    case 'msg':
+      send(p,{t:'ack',id:m.id});
+      if (acceptMsg(m)) for (const q of peers.values()) if (q !== p) send(q, m);
+      break;
+    case 'sig':
+      if (m.to === myId) onSig(p, m);
+      else { const q = peers.get(m.to); if (q) send(q, m); }
+      break;
+    case 'bye': drop(p); break;
+  }
+}
+const cleanName = n => (typeof n === 'string' && n.trim() ? n.trim().slice(0, 32) : 'Guest');
+const roster = () => [{ id: myId, name: myName }, ...[...peers.values()].filter(p => p.open).map(p => ({ id: p.id, name: p.name }))];
+const wire = it => ({ t: 'msg', id: it.id, from: it.from, name: it.name, ts: it.ts, text: it.text, attachments: it.attachments || [], bot: !!it.bot });
+
+/* ---------- automatic mesh: link to peers we hear about, via a mutual peer ---------- */
+function mergeRoster(list, via) {
+  if (!Array.isArray(list)) return;
+  for (const r of list.slice(0, 64)) {
+    if (!r || typeof r.id !== 'string' || r.id === myId || peers.has(r.id)) continue;
+    if (myId < r.id) initiate(r.id, r.name, via);
+    else send(via, { t: 'sig', to: r.id, from: myId, name: myName, k: 'want' });
+  }
+}
+function expire(p) {
+  setTimeout(() => { if (!p.everOpen) drop(p); }, CONFIG.relayTimeoutMs);
+}
+async function initiate(id, name, via) {
+  if (peers.has(id)) return;
+  const pc = newPc(), p = register(id, name, pc);
+  expire(p);
+  try {
+    const { dc, sdp } = await makeOffer(pc);
+    bindChannel(p, dc);
+    send(via, { t: 'sig', to: id, from: myId, name: myName, k: 'o', sdp });
+  } catch (e) { drop(p); }
+}
+async function onSig(via, m) {
+  const from = m.from;
+  if (typeof from !== 'string' || from === myId) return;
+  const cur = peers.get(from);
+  if (m.k === 'want') {
+    if (!cur && myId < from) initiate(from, m.name, via);
+  } else if (m.k === 'o' && typeof m.sdp === 'string') {
+    if (cur) return;
+    const pc = newPc(), p = register(from, m.name, pc);
+    expire(p);
+    try { send(via, { t: 'sig', to: from, from: myId, name: myName, k: 'a', sdp: await makeAnswer(pc, m.sdp) }); }
+    catch (e) { drop(p); }
+  } else if (m.k === 'a' && typeof m.sdp === 'string') {
+    if (cur && !cur.open && cur.pc.signalingState === 'have-local-offer')
+      cur.pc.setRemoteDescription({ type: 'answer', sdp: m.sdp }).catch(() => drop(cur));
+  }
+}
+
+/* ---------- manual first link ---------- */
+async function createInvite() {
+  const pc = newPc();
+  const { dc, sdp } = await makeOffer(pc);
+  const cid = randId(6);
+  pending.set(cid, { pc, dc });
+  setTimeout(() => { const x = pending.get(cid); if (x) { pending.delete(cid); x.pc.close(); } }, 15 * 60 * 1000);
+  return seal({ k: 'o', cid, id: myId, name: myName, sdp });
+}
+async function useCode(code) {
+  let o;
+  try { o = await unseal(code); }
+  catch { throw new Error("That code doesn't match this room link, or part of it was cut off."); }
+  if (!o || typeof o.id !== 'string' || typeof o.sdp !== 'string') throw new Error('That code is not valid.');
+  if (o.id === myId) throw new Error('That is your own code. Send it to the other person instead.');
+  const cur = peers.get(o.id);
+  if (cur && cur.open) throw new Error('You are already connected to ' + cur.name + '.');
+  if (o.k === 'o') {
+    if (cur) drop(cur, true);
+    const pc = newPc();
+    register(o.id, o.name, pc);
+    const sdp = await makeAnswer(pc, o.sdp);
+    return { reply: await seal({ k: 'a', cid: o.cid, id: myId, name: myName, sdp }), name: displayName(o.id, o.name) };
+  }
+  if (o.k === 'a') {
+    const x = pending.get(o.cid);
+    if (!x) throw new Error('This reply is for an invite that has expired. Create a new invite.');
+    pending.delete(o.cid);
+    if (cur) drop(cur, true);
+    const p = register(o.id, o.name, x.pc);
+    bindChannel(p, x.dc);
+    await x.pc.setRemoteDescription({ type: 'answer', sdp: o.sdp });
+    return { name: p.name };
+  }
+  throw new Error('That code is not valid.');
+}
+
+/* ---------- timeline ---------- */
+const cmp = (a, b) => a.ts - b.ts || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+function acceptMsg(m) {
+  if (typeof m.id !== 'string' || seen.has(m.id) || typeof m.text !== 'string' || (!m.text && !m.attachments?.length) ||
+      m.text.length > CONFIG.maxTextChars || !Number.isFinite(m.ts) || !validAttachments(m.attachments) || !allowed(displayName(m.from, m.name)) ||
+      expired(m.ts) || m.ts > Date.now() + 300000) return false;
+  seen.add(m.id);
+  addItem({ kind: 'msg', id: m.id, from: String(m.from), name: displayName(m.from, m.name), ts: m.ts, text: m.text, attachments: m.attachments || [], bot: m.bot === true });
+  return true;
+}
+function sys(text) { addItem({ kind: 'sys', id: randId(4), ts: Date.now(), text }); }
+function addItem(it) {
+  const log = $('log'), last = items[items.length - 1];
+  const stick = log.scrollHeight - log.scrollTop - log.clientHeight < 80 || it.from === myId;
+  items.push(it); if(typeof refreshExplorer==='function') refreshExplorer();
+  $('empty').classList.add('hidden');
+  if (last && cmp(last, it) > 0) {
+    items.sort(cmp);
+    log.querySelectorAll('.msg,.sys').forEach(n => n.remove());
+    for (const x of items) log.append(node(x));
+  } else log.append(node(it));
+  if (stick) log.scrollTop = log.scrollHeight;
+}
+function node(it) {
+  const el = document.createElement('div');
+  if (it.kind === 'sys') { el.className = 'sys'; el.textContent = it.text; return el; }
+  el.className = 'msg' + (it.from === myId ? ' mine' : '') + (it.bot ? ' bot' : '');
+  const meta = document.createElement('div'); meta.className = 'meta';
+  const who = document.createElement('b'); who.textContent = it.bot ? CONFIG.assistantName + ' · asked by ' + it.name : it.name;
+  const when = document.createElement('span');
+  when.textContent = new Date(it.ts).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const cp = document.createElement('button'); cp.type = 'button'; cp.textContent = 'Copy';
+  cp.addEventListener('click', async () => { cp.textContent = (await copy(it.text)) ? 'Copied' : 'Copy failed'; setTimeout(() => cp.textContent = 'Copy', 1500); });
+  meta.append(who, when, cp);
+  const body = document.createElement('div'); body.className='body'; renderMarkdown(body,it.text);
+  el.append(meta, body); for(const a of it.attachments || []) el.append(attachmentNode(a));
+  return el;
+}
+function renderPeers() {
+  const box = $('peers'); box.textContent = '';
+  const chip = (text, cls) => { const c = document.createElement('span'); c.className = 'chip ' + cls; c.textContent = text; box.append(c); };
+  chip(myName + ' (you)', 'me');
+  for (const name of bucket.present.values()) chip(name, '');
+  for (const name of relay.names.values()) chip(name, '');
+  for (const p of peers.values()) chip(p.open ? p.name : p.name + ' · connecting', p.open ? '' : 'wait');
+  if (CONFIG.assistant && aiChipText()) chip(aiChipText(), 'wait');
+  if (mode) { const m = document.createElement('span'); m.id = 'mode'; m.textContent = mode; box.append(m); }
+}
+async function copy(text) {
+  try { await navigator.clipboard.writeText(text); return true; }
+  catch {
+    const t = document.createElement('textarea'); t.value = text; document.body.append(t); t.select();
+    let ok = false; try { ok = document.execCommand('copy'); } catch {}
+    t.remove(); return ok;
+  }
+}
+
+/* ---------- UI wiring ---------- */
+$('nameInput').value = 'Guest-' + myId.slice(0, 4);
+ready.then(() => {
+  $('gateRoom').textContent = 'Room: ' + roomLabel;
+  $('gateConfig').textContent = configNote;
+  $('gateBlurb').textContent = CONFIG.transport === 'direct'
+    ? 'Messages travel directly between browsers and are never stored.'
+    : CONFIG.transport === 'relay'
+    ? 'Messages travel directly between browsers and are never stored. Public relay servers only introduce browsers to each other.'
+    : CONFIG.keepHistory
+      ? "Messages are encrypted and kept in shared storage, so the room's history is here next time."
+      : 'Messages are encrypted in shared storage while the room is in use, and wiped when the last person leaves.';
+  if (CONFIG.members.length) {
+    for (const n of CONFIG.members) { const o = document.createElement('option'); o.textContent = n; $('nameSelect').append(o); }
+    $('nameSelect').classList.remove('hidden'); $('nameInput').classList.add('hidden');
+    $('nameLabel').textContent = 'Who are you?';
+  } else if (anon()) {
+    $('nameInput').classList.add('hidden');
+    $('nameLabel').textContent = 'You will appear as ' + anonName(myId) + '. Names are random and change each visit.';
+  }
+  const tips = ['Share this page\'s link. Everyone who opens it lands in the same room.'];
+  if (anon()) tips.push('Nobody types a name. Everyone gets a random one that changes each visit.');
+  tips.push((CONFIG.historyMinutes ? 'Messages disappear after ' + CONFIG.historyMinutes + ' minutes. ' : '') + 'Use Save chat to keep your own copy.');
+  if (CONFIG.assistant) tips.push('Write @ai in a message to ask the built-in assistant. It runs on your own device.');
+  for (const t of tips) { const li = document.createElement('li'); li.textContent = t; $('howto').append(li); }
+  if (CONFIG.assistant) startAssistant();
+  $('enterBtn').disabled = false;
+});
+$('gate').addEventListener('submit', e => {
+  e.preventDefault();
+  myName = CONFIG.members.length ? $('nameSelect').value : anon() ? anonName(myId) : cleanName($('nameInput').value);
+  $('gate').classList.add('hidden');
+  for (const id of ['bar', 'peers', 'log', 'composer']) $(id).classList.remove('hidden');
+  $('roomName').textContent = roomLabel;
+  document.title = 'Room ' + roomLabel;
+  renderPeers();
+  $('text').focus();
+  setInterval(prune, 15000);
+  if (CONFIG.sessionMinutes) setTimeout(() => { leave(true); location.reload(); }, CONFIG.sessionMinutes * 60000);
+  chooseTransport().then(t => {
+    if (t === 'storage') {
+      mode = 'Encrypted · via shared storage' + (CONFIG.keepHistory ? ' · history kept' : '');
+      $('empty').textContent = "Nothing here yet. Anyone who opens this link appears automatically.";
+    } else if (t === 'relay') {
+      mode = 'Encrypted · direct · auto-join via relays';
+      $('empty').textContent = "Nothing here yet. Anyone who opens this link appears automatically.";
+      if (CONFIG.transport === 'storage') sys("Shared storage isn't available here (" + bucket.why + '), so this room connects people directly, introduced by public relays.');
+    } else {
+      mode = 'Encrypted · direct';
+      $('connectBtn').classList.remove('hidden');
+      $('empty').textContent = "You're the only one here. Tap Connect to bring someone in.";
+      const why = [];
+      if (CONFIG.transport === 'storage') why.push("Shared storage can't be used from this page (" + bucket.why + ').');
+      if (relay.why) why.push('Public relays could not be used (' + relay.why + ').');
+      if (why.length) sys(why.join(' ') + ' This room is using invite codes. Tap Connect.');
+    }
+    renderPeers();
+  });
+});
+
+const MAX_BYTES = 1024*1024, MAX_ATTACH = 8;
+let drafts = [], reading = false, posting = false;
+const sizeOf = a => Math.floor(a.data.length*3/4);
+function validAttachments(as) {
+  if(as === undefined) return true;
+  return Array.isArray(as) && as.length <= MAX_ATTACH && as.every(a => a && typeof a.name==='string' && a.name.length<=200 && typeof a.type==='string' && a.type.length<=100 && typeof a.data==='string' && /^[A-Za-z0-9_-]*$/.test(a.data) && a.data.length%4!==1) && as.reduce((n,a)=>n+sizeOf(a),0)<=MAX_BYTES+MAX_ATTACH;
+}
+function attachmentNode(a, draft=false) {
+  const box=document.createElement('div'); box.className='attachment';
+  const label=document.createElement('span'); label.textContent=a.name; box.append(label);
+  const small=document.createElement('small'); small.textContent=Math.ceil(sizeOf(a)/1024)+' KB'; box.append(small);
+  const bytes=unb64u(a.data);
+  const button=(name,fn)=>{const b=document.createElement('button');b.type='button';b.textContent=name;b.onclick=fn;box.append(b);};
+  if(/^image\/(png|jpeg|gif|webp)$/.test(a.type)) {
+    const img=document.createElement('img');img.alt=a.name;const url=URL.createObjectURL(new Blob([bytes],{type:a.type}));img.onload=img.onerror=()=>URL.revokeObjectURL(url);img.src=url;img.onclick=()=>inspectImage(a);box.append(img);
+  }
+  if(draft) button('Remove',()=>{drafts=drafts.filter(x=>x!==a);renderDrafts();});
+  else {
+    button('Save',()=>{const url=URL.createObjectURL(new Blob([bytes],{type:'application/octet-stream'}));const link=document.createElement('a');link.href=url;link.download=a.name;link.click();setTimeout(()=>URL.revokeObjectURL(url),30000);});
+    if(a.type.startsWith('text/') || /\.(js|ts|py|json|md|html|css|sh|yaml|yml|csv|xml|sql|rs|go|java|cpp|c|h)$/i.test(a.name)) {
+      button('Preview',()=>{const old=box.querySelector('pre');if(old){old.remove();return;}const pre=document.createElement('pre');highlight(pre,dec.decode(bytes).slice(0,50000));box.append(pre);});
+      button('Copy',()=>copy(dec.decode(bytes)));
+    }
+  } return box;
+}
+function renderDrafts(){ $('drafts').replaceChildren(...drafts.map(a=>attachmentNode(a,true))); $('draftStatus').textContent=drafts.length?drafts.length+' attached · 1 MiB total limit':''; }
+async function addFiles(files){
+  if(reading||posting)return;reading=true;$('sendBtn').disabled=true;
+  let error='';try{for(const f of files){if(drafts.length>=MAX_ATTACH || f.size+drafts.reduce((n,a)=>n+sizeOf(a),0)>MAX_BYTES){error='Attachment limit: 8 files / 1 MiB total.';break;}drafts.push({name:(f.name||'attachment').slice(0,200),type:(f.type||'application/octet-stream').slice(0,100),data:b64u(new Uint8Array(await f.arrayBuffer()))});}}catch(e){error='Could not read attachment.';}finally{reading=false;$('sendBtn').disabled=false;renderDrafts();if(error)$('draftStatus').textContent=error;}
+}
+$('attach').onclick=()=>$('files').click(); $('files').onchange=e=>{addFiles([...e.target.files]);e.target.value='';};
+$('code').onclick=()=>{const t=$('text');const value=t.value.slice(t.selectionStart,t.selectionEnd)||t.value;if(!value.trim()){$('draftStatus').textContent='Paste code into the composer first.';return;}addFiles([new File([value],'snippet.txt',{type:'text/plain'})]);};
+$('pasteText').onclick=async()=>{try{const value=await navigator.clipboard.readText();if(value)await addFiles([new File([value],'clipboard.txt',{type:'text/plain'})]);}catch{$('draftStatus').textContent='Clipboard unavailable. Paste into composer and use Code.';}};
+$('composer').addEventListener('paste',e=>{const files=[...e.clipboardData.files];if(files.length){e.preventDefault();addFiles(files);}});
+for(const event of ['dragover','dragleave','drop']) $('composer').addEventListener(event,e=>{e.preventDefault();$('composer').classList.toggle('drag',event==='dragover');if(event==='drop')addFiles([...e.dataTransfer.files]);});
+// Send one message over whichever transport is active, then show it locally.
+async function deliver(m) {
+  if (bucket.on) { const key = 'm-' + m.ts.toString(36).padStart(9, '0') + '-' + m.id; bucket.fetched.add(key); await bPut(key, await seal(m)); bucket.keys.push(key); }
+  else if (relay.on) { if (relayPeerCount()) await relay.msg.send(m); }
+  else { const results = await Promise.all([...peers.values()].filter(p => p.open).map(p => send(p, m))); if (!results.length || results.some(x => !x)) throw Error('One or more transfers failed'); }
+  acceptMsg(m);
+}
+async function post() {
+  if(reading||posting)return;
+  const el=$('text'),text=el.value;if(!text.trim()&&!drafts.length)return;
+  if(text.length>CONFIG.maxTextChars){sys('Message exceeds text limit.');return;}
+  if(!bucket.on && !relay.on && ![...peers.values()].some(p=>p.open)){sys('Connect a participant before sending.');return;}
+  posting=true;$('sendBtn').disabled=true;el.disabled=true;
+  const m={t:'msg',id:randId(8),from:myId,name:myName,ts:Date.now(),text,attachments:[...drafts]};
+  try {
+    await deliver(m);
+    el.value='';el.style.height='';drafts=[];renderDrafts();
+    if (CONFIG.assistant && /(^|\s)@ai\b/i.test(text)) askAssistant();
+  }catch(e){sys('Send failed; draft retained. '+e.message);}finally{posting=false;el.disabled=false;$('sendBtn').disabled=false;}
+}
+$('composer').addEventListener('submit', e => { e.preventDefault(); post(); });
+$('text').addEventListener('keydown', e => {
+  if (e.key === 'Enter' && !e.shiftKey && !e.isComposing && matchMedia('(pointer: fine)').matches) { e.preventDefault(); post(); }
+});
+$('text').addEventListener('input', e => { const t = e.target; t.style.height = ''; t.style.height = Math.min(t.scrollHeight + 2, innerHeight * 0.4) + 'px'; });
+
+/* ---------- sliding window and saving ---------- */
+function prune() {
+  if (!CONFIG.historyMinutes) return;
+  const before = items.length;
+  for (let i = items.length - 1; i >= 0; i--) if (expired(items[i].ts)) items.splice(i, 1);
+  if (items.length === before) return;
+  const log = $('log');
+  log.querySelectorAll('.msg,.sys').forEach(n => n.remove());
+  for (const x of items) log.append(node(x));
+  if (!items.length) $('empty').classList.remove('hidden');
+  refreshExplorer();
+}
+$('saveChat').onclick = () => {
+  const pad = n => String(n).padStart(2, '0'), d = new Date();
+  const msgs = items.filter(it => it.kind === 'msg');
+  if (!msgs.length) { $('saveChat').textContent = 'Nothing to save'; setTimeout(() => $('saveChat').textContent = 'Save chat', 1500); return; }
+  const lines = ['Ephemeral Room: ' + roomLabel, 'Saved ' + d.toLocaleString(), ''];
+  for (const it of msgs) {
+    const t = new Date(it.ts);
+    lines.push('[' + pad(t.getHours()) + ':' + pad(t.getMinutes()) + '] ' + (it.bot ? CONFIG.assistantName + ' (asked by ' + it.name + ')' : it.name) + ': ' + it.text);
+    for (const a of it.attachments || []) lines.push('    attachment: ' + a.name + ' (' + Math.ceil(sizeOf(a) / 1024) + ' KB, not included)');
+  }
+  const url = URL.createObjectURL(new Blob([lines.join('\n') + '\n'], { type: 'text/plain' }));
+  const link = document.createElement('a'); link.href = url;
+  link.download = 'chat-' + d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + '-' + pad(d.getHours()) + pad(d.getMinutes()) + '.txt';
+  link.click(); setTimeout(() => URL.revokeObjectURL(url), 30000);
+};
+
+/* ---------- in-browser assistant (WebLLM) ---------- */
+// Each browser downloads the model once (the browser caches it) and runs it
+// locally on WebGPU. The assistant only answers the person who wrote @ai, from
+// that person's own device, then posts the reply to the room like any message.
+function aiNote() {
+  return ai.state === 'loading' ? 'Assistant: downloading a small language model to this device in the background (a few hundred MB, one time)… ' + ai.pct + '%'
+    : ai.state === 'ready' ? 'Assistant: ready on this device' + (ai.worker ? ', running in the background' : '') + '. Write @ai in a message to ask it.'
+    : ai.state === 'unsupported' ? 'Assistant: not available on this device (' + ai.why + ').'
+    : ai.state === 'error' ? 'Assistant: could not be loaded (' + ai.why + ').' : '';
+}
+function aiChipText() {
+  return ai.busy ? 'Assistant is thinking…' : ai.state === 'loading' ? 'Assistant ' + ai.pct + '%' : ai.state === 'ready' ? 'Assistant ready · @ai' : '';
+}
+function renderAi() { $('aiStatus').textContent = aiNote(); if (myName) renderPeers(); }
+async function startAssistant() {
+  if (!navigator.gpu) { ai.state = 'unsupported'; ai.why = 'this browser has no WebGPU'; return renderAi(); }
+  if (navigator.connection && navigator.connection.saveData) { ai.state = 'unsupported'; ai.why = 'data saver is on'; return renderAi(); }
+  let adapter = null; try { adapter = await navigator.gpu.requestAdapter(); } catch {}
+  if (!adapter) { ai.state = 'unsupported'; ai.why = 'no usable graphics adapter'; return renderAi(); }
+  // 16-bit float models need a GPU feature some devices lack; fall back to the 32-bit build.
+  ai.model = CONFIG.assistantModel;
+  if (!adapter.features.has('shader-f16')) ai.model = ai.model.replace(/(q\d)f16/, '$1f32');
+  ai.state = 'loading'; renderAi();
+  try {
+    const url = new URL(CONFIG.assistantLib, location.href).href;
+    const lib = await import(url);
+    const opts = { initProgressCallback: r => { const p = Math.round(((r && r.progress) || 0) * 100); if (p !== ai.pct) { ai.pct = p; renderAi(); } } };
+    // Run the model in a background worker so the page stays responsive while it
+    // thinks. If the worker can't be set up, run it on the main thread instead.
+    let src = '';
+    try {
+      if (typeof lib.CreateWebWorkerMLCEngine !== 'function') throw new Error('this library build has no worker engine');
+      src = URL.createObjectURL(new Blob(['import { WebWorkerMLCEngineHandler } from ' + JSON.stringify(url) +
+        '; const handler = new WebWorkerMLCEngineHandler(); self.onmessage = e => handler.onmessage(e);'], { type: 'text/javascript' }));
+      ai.worker = new Worker(src, { type: 'module' });
+      ai.engine = await lib.CreateWebWorkerMLCEngine(ai.worker, ai.model, opts);
+    } catch (e) {
+      if (ai.worker) { ai.worker.terminate(); ai.worker = null; }
+      ai.pct = 0;
+      ai.engine = await lib.CreateMLCEngine(ai.model, opts);
+    } finally { if (src) URL.revokeObjectURL(src); }
+    ai.state = 'ready';
+  } catch (e) { ai.state = 'error'; ai.why = (e && e.message) || 'unknown error'; }
+  renderAi();
+}
+async function askAssistant() {
+  if (ai.state !== 'ready') { sys(aiNote() || 'The assistant is not available.'); return; }
+  if (ai.busy) { sys('The assistant is still answering the last question.'); return; }
+  ai.busy = true; renderPeers();
+  try {
+    const recent = items.filter(it => it.kind === 'msg' && !expired(it.ts)).slice(-12);
+    const transcript = recent.map(it => (it.bot ? CONFIG.assistantName : it.name) + ': ' + it.text.slice(0, 400)).join('\n').slice(-3000);
+    const messages = [
+      { role: 'system', content: 'You are a helpful assistant taking part in a small group chat. Answer the latest request briefly and plainly. If you do not know, say so.' },
+      { role: 'user', content: 'Chat so far:\n' + transcript + '\n\nReply to the last message, which mentions you with @ai.' },
+    ];
+    const r = await ai.engine.chat.completions.create({ messages, temperature: 0.5, max_tokens: 256 });
+    const text = String((r && r.choices && r.choices[0] && r.choices[0].message && r.choices[0].message.content) || '').trim().slice(0, 4000);
+    if (text) await deliver({ t: 'msg', id: randId(8), from: myId, name: myName, ts: Date.now(), text, attachments: [], bot: true });
+    else sys('The assistant had nothing to say.');
+  } catch (e) { sys('The assistant could not answer: ' + ((e && e.message) || 'unknown error')); }
+  ai.busy = false; renderPeers();
+}
+
+const dlg = $('dlg');
+function status(text, err) { $('status').textContent = text; $('status').className = err ? 'err' : ''; }
+function showOut(label, code) { $('outLabel').textContent = label; $('codeOut').value = code; $('outWrap').classList.remove('hidden'); }
+$('connectBtn').addEventListener('click', () => { status(''); $('outWrap').classList.add('hidden'); $('codeIn').value = ''; $('codeOut').value = ''; dlg.showModal(); });
+$('closeBtn').addEventListener('click', () => dlg.close());
+$('inviteBtn').addEventListener('click', async () => {
+  $('inviteBtn').disabled = true; status('Preparing invite…');
+  try {
+    showOut('Send this invite to the person joining', await createInvite());
+    status('Invite ready. Send it, then paste their reply above.');
+  } catch (e) { status('Could not create an invite: ' + e.message, true); }
+  $('inviteBtn').disabled = false;
+});
+$('useBtn').addEventListener('click', async () => {
+  const code = $('codeIn').value.trim();
+  if (!code) return status('Paste a code first.', true);
+  $('useBtn').disabled = true; status('Working…');
+  try {
+    const r = await useCode(code);
+    $('codeIn').value = '';
+    if (r.reply) { showOut('Send this reply back to ' + r.name, r.reply); status('Reply ready. You will connect as soon as ' + r.name + ' pastes it.'); }
+    else { $('outWrap').classList.add('hidden'); status('Connecting to ' + r.name + '…'); }
+  } catch (e) { status(e.message, true); }
+  $('useBtn').disabled = false;
+});
+$('copyBtn').addEventListener('click', async () => { status((await copy($('codeOut').value)) ? 'Copied.' : 'Copy failed. Select the code and copy it manually.'); });
+
+function leave(keepalive) {
+  for (const p of peers.values()) send(p, { t: 'bye' });
+  if (relay.on) { relay.on = false; try { relay.room.leave(); } catch {} }
+  return leaveBucket(keepalive);
+}
+$('leaveBtn').addEventListener('click', async () => { $('leaveBtn').disabled = true; await Promise.all(leave(false)); location.reload(); });
+addEventListener('pagehide', () => leave(true));
+addEventListener('pageshow', e => { if (e.persisted) location.reload(); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && bucket.on) heartbeat(); });
+addEventListener('hashchange', () => location.reload());
+
+function highlight(el,source){el.classList.add('codeview');el.replaceChildren();source.split('\n').forEach((line,i)=>{const num=document.createElement('span');num.className='ln';num.textContent=i+1;el.append(num);for(const part of line.split(/("(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'|\b(?:const|let|var|function|return|if|else|import|from|class|def|async|await|for|while|true|false|null|None|self)\b|\b\d+(?:\.\d+)?\b)/g)){const t=document.createElement('span');t.textContent=part;if(/^['"]/.test(part))t.className='str';else if(/^\d/.test(part))t.className='num';else if(/^(const|let|var|function|return|if|else|import|from|class|def|async|await|for|while|true|false|null|None|self)$/.test(part))t.className='kw';el.append(t);}el.append('\n');});}
+function renderMarkdown(el,source){let code=null;for(const line of source.split('\n')){if(/^```/.test(line)){if(code!==null){const pre=document.createElement('pre');highlight(pre,code.join('\n'));el.append(pre);code=null;}else code=[];continue;}if(code!==null){code.push(line);continue;}const h=line.match(/^#{1,6} (.*)/);const p=document.createElement(h?'h3':'div');const value=h?h[1]:line;for(const part of value.split(/(\*\*[^*]+\*\*|`[^`]+`)/g)){const n=document.createElement(part.startsWith('**')?'strong':part.startsWith('`')?'code':'span');n.textContent=part.startsWith('**')?part.slice(2,-2):part.startsWith('`')?part.slice(1,-1):part;p.append(n);}if(!value)p.append(document.createElement('br'));el.append(p);}if(code!==null){const pre=document.createElement('pre');highlight(pre,code.join('\n'));el.append(pre);}}
+function refreshExplorer(){const q=$('searchFiles').value.toLowerCase();$('fileList').replaceChildren();for(const it of items)for(const a of it.attachments||[]){if(!a.name.toLowerCase().includes(q))continue;const b=document.createElement('button');b.textContent=a.name+' · '+it.name;b.onclick=()=>{if(/^image\/(png|jpeg|gif|webp)$/.test(a.type))inspectImage(a);else{$('inspectTitle').textContent=a.name;$('imageArea').replaceChildren(attachmentNode(a));$('zoom').parentElement.hidden=true;$('inspect').showModal();}};$('fileList').append(b);}}
+$('explore').onclick=()=>{$('explorer').classList.toggle('hidden');refreshExplorer();};$('searchFiles').oninput=refreshExplorer;$('shareLink').onclick=async()=>{ $('shareLink').textContent=await copy(location.href)?'Copied':'Copy failed';};
+let imageUrl;function inspectImage(a){if(imageUrl)URL.revokeObjectURL(imageUrl);imageUrl=URL.createObjectURL(new Blob([unb64u(a.data)],{type:a.type}));const img=document.createElement('img');img.src=imageUrl;img.alt=a.name;$('imageArea').replaceChildren(img);$('inspectTitle').textContent=a.name;$('zoom').parentElement.hidden=false;$('zoom').value=1;$('inspect').showModal();} $('zoom').oninput=()=>{const img=$('imageArea').querySelector('img');if(img){img.style.width=(Number($('zoom').value)*100)+'%';img.style.maxWidth='none';}};$('inspect').onclose=()=>{if(imageUrl)URL.revokeObjectURL(imageUrl);imageUrl=null;$('imageArea').replaceChildren();};
+$('diffBtn').onclick=()=>$('diffDialog').showModal();let diffText='';$('runDiff').onclick=()=>{const a=$('before').value.split('\n'),b=$('after').value.split('\n');if(a.length*b.length>1000000){$('diffOutput').textContent='Too many lines for local comparison';diffText='';return;}const d=Array.from({length:a.length+1},()=>new Uint32Array(b.length+1));for(let i=a.length-1;i>=0;i--)for(let j=b.length-1;j>=0;j--)d[i][j]=a[i]===b[j]?1+d[i+1][j+1]:Math.max(d[i+1][j],d[i][j+1]);let i=0,j=0,lines=[];while(i<a.length||j<b.length){if(i<a.length&&j<b.length&&a[i]===b[j]){lines.push('  '+a[i]);i++;j++;}else if(j<b.length&&(i===a.length||d[i][j+1]>d[i+1][j]))lines.push('+ '+b[j++]);else lines.push('- '+a[i++]);}diffText=lines.join('\n');$('diffOutput').replaceChildren(...lines.map(l=>{const n=document.createElement('div');n.className=l.startsWith('+')?'diffadd':l.startsWith('-')?'diffdel':'';n.textContent=l;return n;}));};$('attachDiff').onclick=()=>{if(diffText){addFiles([new File([diffText],'comparison.diff',{type:'text/plain'})]);$('diffDialog').close();}};
+</script>
+</body>
+</html>

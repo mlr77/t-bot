@@ -1,0 +1,14 @@
+{
+  "transport": "storage",
+  "fallback": "relay",
+  "defaultRoom": "lobby",
+  "members": [],
+  "randomNames": true,
+  "keepHistory": false,
+  "historyMinutes": 60,
+  "sessionMinutes": 0,
+  "iceServers": [],
+  "bucketRoot": "",
+  "assistant": true,
+  "assistantModel": "SmolLM2-360M-Instruct-q4f16_1-MLC"
+}
