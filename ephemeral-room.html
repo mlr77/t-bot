@@ -302,7 +302,7 @@ const $ = id => document.getElementById(id);
 const enc = new TextEncoder(), dec = new TextDecoder();
 const randId = n => Array.from(crypto.getRandomValues(new Uint8Array(n)), b => b.toString(16).padStart(2, '0')).join('');
 
-let room = '', roomTag = '', roomLabel = '', configNote = '', roomModel = false;
+let room = '', roomTag = '', roomLabel = '', configNote = '', roomModel = false, roomSpecial = false;
 const myId = randId(8);
 
 /* ---------- owner settings ---------- */
@@ -343,6 +343,7 @@ async function loadConfig() {
   // A private room's passcode is its secret, so show a fingerprint instead.
   const special = CONFIG.rooms && Object.prototype.hasOwnProperty.call(CONFIG.rooms, room) ? CONFIG.rooms[room] : null;
   if (special && typeof special === 'object') {   // a named specialty room carries its own settings
+    roomSpecial = true;
     if (typeof special.house === 'boolean') CONFIG.house = special.house;
     if (typeof special.feed === 'string') CONFIG.feed = special.feed.slice(0, 300);
     if (typeof special.language === 'string') CONFIG.language = special.language.slice(0, 40);
@@ -917,7 +918,7 @@ $('gate').addEventListener('submit', e => {
   $('text').focus();
   setInterval(prune, 15000);
   houseStart();
-  if (autoEntered) sys('You came in by a private link. Anyone with the link can join. You appear as ' + myName + '.'
+  if (autoEntered) sys((roomSpecial ? 'This is an open room that anyone can find.' : 'You came in by a private link. Anyone with the link can join.') + ' You appear as ' + myName + '.'
     + (CONFIG.historyMinutes ? ' Messages disappear after ' + CONFIG.historyMinutes + ' minutes.' : '')
     + (CONFIG.assistant ? ' Write @ai to ask the assistant.' : ''));
   if (CONFIG.sessionMinutes) setTimeout(() => { leave(true); toStart(); }, CONFIG.sessionMinutes * 60000);
@@ -1277,7 +1278,7 @@ async function feedPost(f) {
     if (houseKey(note) === houseKey(f.title)) note = '';
   }
   if (house.seen.has(f.id) && items.some(it => it.feed === f.id)) return;   // another browser posted it meanwhile
-  await deliver({ t: 'msg', id: randId(8), from: myId, name: myName, ts: Date.now(), text: [f.title, note, f.link].filter(Boolean).join('\n'), attachments: [], bot: true, house: true, as: 'Newswire', feed: f.id });
+  await deliver({ t: 'msg', id: randId(8), from: myId, name: myName, ts: Date.now(), text: (CONFIG.language ? [note, f.title, f.link] : [f.title, note, f.link]).filter(Boolean).join('\n'),   // the room's language first, so replies follow it attachments: [], bot: true, house: true, as: 'Newswire', feed: f.id });
 }
 
 const dlg = $('dlg');
